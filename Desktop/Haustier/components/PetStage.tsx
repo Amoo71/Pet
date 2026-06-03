@@ -73,6 +73,7 @@ const ENERGY_ICON = "/assets/backgrounds/UI/energy.png";
 const MOOD_ICON = "/assets/backgrounds/UI/mood.png";
 const CAM_ICON = "/assets/backgrounds/UI/cam.png";
 const SETTINGS_ICON = "/assets/backgrounds/UI/settings.png";
+const POSITION_IMAGE = "/assets/backgrounds/UI/position.png";
 const BALL_CENTER: Point = { x: 50, y: 82 };
 const BALL_BOUNDS = { minX: 7, maxX: 93, minY: MOVEMENT_AREA.minY, maxY: MOVEMENT_AREA.maxY };
 const BALL_AIR_BOUNDS = { minY: 8, floorY: BALL_CENTER.y };
@@ -102,6 +103,7 @@ export function PetStage() {
   const [scenePan, setScenePan] = useState<Point>({ x: 0, y: 0 });
   const [focusedPet, setFocusedPet] = useState(false);
   const [cameraFollowsPet, setCameraFollowsPet] = useState(false);
+  const [walkTargetMarker, setWalkTargetMarker] = useState<Point | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeInventoryCategory, setActiveInventoryCategory] = useState<InventoryCategory | null>(null);
   const [selectedPetId, setSelectedPetId] = useState<SharedPet["id"]>("pet1");
@@ -229,6 +231,7 @@ export function PetStage() {
     "--scene-pan-x": `${scenePan.x}px`,
     "--scene-pan-y": `${scenePan.y}px`,
     "--camera-transition-duration": cameraFollowsPet && walkDurationMs > 0 ? `${walkDurationMs}ms` : "260ms",
+    "--camera-transition-easing": cameraFollowsPet && walkDurationMs > 0 ? "linear" : "cubic-bezier(0.22, 1, 0.36, 1)",
     "--world-aspect": BACKGROUND_ASPECT_RATIO,
     "--world-natural-width": `${BACKGROUND_WIDTH}px`,
     "--world-natural-height": `${BACKGROUND_HEIGHT}px`,
@@ -446,6 +449,7 @@ export function PetStage() {
       MOOD_ICON,
       CAM_ICON,
       SETTINGS_ICON,
+      POSITION_IMAGE,
       ...Object.values(CATEGORY_ICONS)
     ].forEach(preloadImage);
 
@@ -702,6 +706,7 @@ export function PetStage() {
       y: clampPosition(worldY, MOVEMENT_AREA.minY, MOVEMENT_AREA.maxY)
     };
 
+    setWalkTargetMarker(target);
     walkTo(target);
   };
 
@@ -722,6 +727,7 @@ export function PetStage() {
       setPetPosition(target);
 
       const standTimer = setTimeout(() => {
+        setWalkTargetMarker(null);
         setWalkDurationMs(0);
         setPetState("stehen");
         changeStats({ energy: -1 });
@@ -745,6 +751,7 @@ export function PetStage() {
     if (!nextBackground || nextBackground.id === backgroundId) return;
 
     clearTimers();
+    setWalkTargetMarker(null);
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setScenePan({ x: 0, y: 0 });
@@ -765,6 +772,7 @@ export function PetStage() {
       setPetPosition(target);
 
       const standTimer = setTimeout(() => {
+        setWalkTargetMarker(null);
         setWalkDurationMs(0);
         setPetState("stehen");
       }, duration);
@@ -813,6 +821,7 @@ export function PetStage() {
 
     setFocusedPet(false);
     setActiveInventoryCategory(null);
+    setCameraFollowsPet(false);
     setScenePan({ x: 0, y: 0 });
     setBackgroundId(nextBackgroundId);
     setSettingsOpen(false);
@@ -916,6 +925,7 @@ export function PetStage() {
     if (!nextPet) return;
 
     clearTimers();
+    setWalkTargetMarker(null);
     setSelectedPetId(nextPet.id);
     setBackgroundId(nextPet.roomId);
     setFocusedPet(false);
@@ -929,11 +939,14 @@ export function PetStage() {
   const toggleCameraFollow = () => {
     setFocusedPet(false);
     setActiveInventoryCategory(null);
+    setSettingsOpen(false);
     setCameraFollowsPet((current) => {
       const next = !current;
       if (next) {
         setZoom(1);
         setScenePan(getFocusPan(petPosition, 1));
+      } else {
+        setScenePan(clampScenePan(scenePan, zoom));
       }
       return next;
     });
@@ -1624,6 +1637,14 @@ export function PetStage() {
               );
             })}
 
+            {walkTargetMarker && selectedPet.roomId === backgroundId ? (
+              <div
+                aria-hidden="true"
+                className="walkTargetMarker"
+                style={{ "--target-x": `${walkTargetMarker.x}%`, "--target-y": `${walkTargetMarker.y}%` } as CSSProperties}
+              />
+            ) : null}
+
             {ballVisible && ballRoomId === backgroundId ? (
               <div
                 aria-label="Ball"
@@ -1864,6 +1885,7 @@ export function PetStage() {
                   aria-pressed={cameraFollowsPet}
                   className={`iconControlButton cameraFollowButton${cameraFollowsPet ? " active" : ""}`}
                   onClick={toggleCameraFollow}
+                  onPointerUp={(event) => event.currentTarget.blur()}
                   title="Follow pet camera"
                   type="button"
                 >
