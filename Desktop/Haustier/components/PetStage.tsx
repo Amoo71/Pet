@@ -97,6 +97,7 @@ const BACKGROUND_HEIGHT = 941;
 const BACKGROUND_ASPECT_RATIO = BACKGROUND_WIDTH / BACKGROUND_HEIGHT;
 const DEFAULT_PET_VARIANT = PET_VARIANTS[0]?.id ?? "pet";
 const SECOND_PET_VARIANT = PET_VARIANTS[1]?.id ?? DEFAULT_PET_VARIANT;
+const MOBILE_MEDIA_QUERY = "(max-width: 760px)";
 
 export function PetStage() {
   const [backgroundId, setBackgroundId] = useState(BACKGROUNDS[0]?.id ?? "wiese");
@@ -476,7 +477,7 @@ export function PetStage() {
       noteImage.src = src;
     });
 
-    if (window.matchMedia("(max-width: 760px)").matches) {
+    if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
       requestAnimationFrame(() => {
         setZoom(MIN_ZOOM);
         setScenePan({ x: 0, y: 0 });
@@ -948,7 +949,9 @@ export function PetStage() {
         setZoom(1);
         setScenePan(getFocusPan(petPosition, 1));
       } else {
-        setScenePan(clampScenePan(scenePan, zoom));
+        const nextZoom = window.matchMedia(MOBILE_MEDIA_QUERY).matches ? MIN_ZOOM : zoom;
+        setZoom(nextZoom);
+        setScenePan(clampScenePan(scenePan, nextZoom));
       }
       return next;
     });
