@@ -84,7 +84,9 @@ const SYNC_INTERVAL_MS = 250;
 const SYNC_DEBOUNCE_MS = 90;
 const LOCAL_INTERACTION_PROTECT_MS = 1400;
 const NAME_SAVE_DEBOUNCE_MS = 2000;
-const SETTINGS_HOLD_MS = 5_000;
+const SETTINGS_CLICK_COUNT = 5;
+const SETTINGS_CLICK_WINDOW_MS = 1_500;
+const CAMERA_CLICK_COMMIT_MS = 420;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
 const SLEEP_DURATION_MS = 10_000;
@@ -184,8 +186,9 @@ export function PetStage() {
   const localInteractionProtectUntil = useRef(0);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settingsHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settingsHoldTriggered = useRef(false);
+  const cameraClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraClickCount = useRef(0);
+  const firstCameraClickAt = useRef(0);
   const suppressNextClick = useRef(false);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
@@ -492,7 +495,7 @@ export function PetStage() {
       if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
       if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
-      if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
+      if (cameraClickTimer.current) clearTimeout(cameraClickTimer.current);
     };
   }, []);
 
@@ -979,34 +982,36 @@ export function PetStage() {
     });
   };
 
-  const startSettingsHold = (event: PointerEvent<HTMLButtonElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    settingsHoldTriggered.current = false;
-    if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
-
-    settingsHoldTimer.current = setTimeout(() => {
-      settingsHoldTriggered.current = true;
-      setFocusedPet(false);
-      setActiveInventoryCategory(null);
-      setCameraFollowsPet(false);
-      setSettingsOpen((current) => !current);
-      settingsHoldTimer.current = null;
-    }, SETTINGS_HOLD_MS);
-  };
-
-  const finishSettingsHold = (event: PointerEvent<HTMLButtonElement>) => {
-    if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
-    settingsHoldTimer.current = null;
-    event.currentTarget.blur();
+  const toggleSettingsFromCameraButton = () => {
+    setFocusedPet(false);
+    setActiveInventoryCategory(null);
+    setCameraFollowsPet(false);
+    setSettingsOpen((current) => !current);
   };
 
   const handleCameraButtonClick = () => {
-    if (settingsHoldTriggered.current) {
-      settingsHoldTriggered.current = false;
+    const now = Date.now();
+    if (now - firstCameraClickAt.current > SETTINGS_CLICK_WINDOW_MS) {
+      firstCameraClickAt.current = now;
+      cameraClickCount.current = 0;
+    }
+
+    cameraClickCount.current += 1;
+    if (cameraClickTimer.current) clearTimeout(cameraClickTimer.current);
+
+    if (cameraClickCount.current >= SETTINGS_CLICK_COUNT) {
+      cameraClickCount.current = 0;
+      firstCameraClickAt.current = 0;
+      toggleSettingsFromCameraButton();
       return;
     }
 
-    toggleCameraFollow();
+    cameraClickTimer.current = setTimeout(() => {
+      cameraClickCount.current = 0;
+      firstCameraClickAt.current = 0;
+      cameraClickTimer.current = null;
+      toggleCameraFollow();
+    }, CAMERA_CLICK_COMMIT_MS);
   };
 
   const togglePetSlot = (slotId: SharedPet["id"], assetKey: string) => {
@@ -1929,11 +1934,8 @@ export function PetStage() {
                   aria-pressed={settingsOpen || cameraFollowsPet}
                   className={`iconControlButton cameraFollowButton${settingsOpen || cameraFollowsPet ? " active" : ""}`}
                   onClick={handleCameraButtonClick}
-                  onPointerCancel={finishSettingsHold}
-                  onPointerDown={startSettingsHold}
-                  onPointerLeave={finishSettingsHold}
-                  onPointerUp={finishSettingsHold}
-                  title="Follow pet camera. Hold 5 seconds for settings."
+                  onPointerUp={(event) => event.currentTarget.blur()}
+                  title="Follow pet camera. Click 5 times quickly for settings."
                   type="button"
                 >
                   <NextImage alt="" draggable={false} fill sizes="36px" src={settingsOpen ? SETTINGS_ICON : CAM_ICON} />
