@@ -1,0 +1,1013 @@
+:root {
+  --page-bg: #121520;
+  --panel-bg: rgba(15, 20, 30, 0.72);
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --text: #f7f1df;
+  --muted: #b8b0a1;
+  --accent: #ffd166;
+  --accent-strong: #ff9f1c;
+  --danger: #ef476f;
+  --success: #06d6a0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #222a3c 0, var(--page-bg) 54%);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+  user-select: none;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+.appShell {
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.gameCard {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  cursor: default;
+  isolation: isolate;
+  caret-color: transparent;
+}
+
+.stage::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 35%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.2));
+  pointer-events: none;
+  z-index: 4;
+}
+
+.backgroundSprite,
+.petSprite {
+  position: absolute;
+  image-rendering: auto;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.spriteFrame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.spriteFrame.active {
+  opacity: 1;
+}
+
+.spriteFrame.neighbor {
+  opacity: 0;
+}
+
+.sceneWorld {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: max(100vw, calc(100vh * var(--world-aspect, 1.777)), var(--world-natural-width, 1672px));
+  height: max(100vh, calc(100vw / var(--world-aspect, 1.777)), var(--world-natural-height, 941px));
+  translate: calc(-50% + var(--scene-pan-x, 0px)) calc(-50% + var(--scene-pan-y, 0px));
+  transform: scale(var(--scene-zoom, 1));
+  transform-origin: var(--scene-origin-x, 50%) var(--scene-origin-y, 50%);
+  transition:
+    transform var(--camera-transition-duration, 260ms) cubic-bezier(0.22, 1, 0.36, 1),
+    translate var(--camera-transition-duration, 260ms) cubic-bezier(0.22, 1, 0.36, 1);
+  caret-color: transparent;
+}
+
+.backgroundSprite {
+  inset: 0;
+  z-index: 1;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.backgroundFallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #000;
+}
+
+.petSprite {
+  width: clamp(190px, 28vw, 360px);
+  aspect-ratio: 1;
+  left: var(--pet-x, 50%);
+  top: var(--pet-y, 78%);
+  z-index: 7;
+  translate: -50% -100%;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  transform: scaleX(var(--pet-facing, 1));
+  transform-origin: center bottom;
+  filter: drop-shadow(0 28px 22px rgba(0, 0, 0, 0.28));
+  will-change: left, top, transform;
+  transition:
+    left var(--pet-walk-duration, 0ms) linear,
+    top var(--pet-walk-duration, 0ms) linear;
+  cursor: pointer;
+}
+
+.petSprite .spriteFrame {
+  object-fit: contain;
+}
+
+.petSprite.jumping {
+  animation: petJump 850ms ease-in-out;
+}
+
+.petSprite.sleeping {
+  z-index: 7;
+  translate: -50% -50%;
+  pointer-events: none;
+}
+
+.ball {
+  position: absolute;
+  left: var(--ball-x, 50%);
+  top: var(--ball-y, 82%);
+  z-index: 6;
+  width: clamp(42px, 5vw, 78px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  transform: rotate(var(--ball-rotation, 0deg));
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background-color: #ef476f;
+  background-image:
+    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.78), transparent 22%),
+    radial-gradient(circle at 58% 62%, #f94144 0 22%, transparent 23%),
+    linear-gradient(135deg, #ffd166, #ef476f);
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover, cover, cover;
+  box-shadow: 0 14px 20px rgba(0, 0, 0, 0.28);
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition:
+    left var(--ball-move-duration, 0ms) linear,
+    top var(--ball-move-duration, 0ms) linear;
+}
+
+.ball.hasImage {
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--ball-image);
+  background-size: contain;
+  box-shadow: none;
+}
+
+.ball.hasImage.dragging {
+  box-shadow: none;
+}
+
+.ball.dragging {
+  cursor: grabbing;
+  box-shadow: 0 18px 26px rgba(0, 0, 0, 0.34);
+}
+
+.worldItem {
+  position: absolute;
+  left: var(--item-x, 50%);
+  top: var(--item-y, 82%);
+  z-index: 6;
+  translate: -50% -50%;
+  background-position: center center;
+  background-repeat: no-repeat;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.worldItem.hasImage {
+  aspect-ratio: 1;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.worldItemImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.worldItem.dragging {
+  cursor: grabbing;
+}
+
+.foodItem {
+  width: clamp(48px, 6vw, 92px);
+  aspect-ratio: 1.25;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 70% 32%, #ffd7ad 0 14%, transparent 15%),
+    linear-gradient(135deg, #9b2f21, #551910);
+  box-shadow: 0 14px 20px rgba(0, 0, 0, 0.28);
+}
+
+.foodItem.hasImage {
+  width: clamp(82px, 8vw, 132px);
+}
+
+.bedItem {
+  z-index: 4;
+  width: clamp(110px, 15vw, 210px);
+  aspect-ratio: 2.1;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.18) 40%, transparent 41%),
+    linear-gradient(135deg, #5768d8, #1d255e);
+  box-shadow: 0 18px 24px rgba(0, 0, 0, 0.32);
+}
+
+.bedItem.hasImage {
+  width: clamp(260px, 30vw, 460px);
+}
+
+.bedItem.dragging {
+  z-index: 9;
+}
+
+.noteItem {
+  width: clamp(110px, 12vw, 180px);
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fff4a8, #f6cc54);
+  box-shadow: 0 14px 20px rgba(0, 0, 0, 0.24);
+}
+
+.noteItem.hasImage {
+  background: none;
+  box-shadow: none;
+}
+
+.worldNote {
+  position: absolute;
+  left: var(--note-x, 50%);
+  top: var(--note-y, 35%);
+  z-index: 60;
+  width: clamp(92px, 10vw, 150px);
+  aspect-ratio: 1;
+  border: 0;
+  padding: 0;
+  translate: -50% -50%;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.worldNotePaper,
+.noteViewerPaper {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #fff4a8, #f2c94c);
+  box-shadow: 0 12px 18px rgba(0, 0, 0, 0.28);
+}
+
+.worldNotePaper.note2,
+.noteViewerPaper.note2 {
+  background: linear-gradient(145deg, #d9f4ff, #79c7ef);
+}
+
+.worldNotePaper.hasImage,
+.noteViewerPaper.hasImage {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  box-shadow: none;
+}
+
+.worldNoteDrawing {
+  position: absolute;
+  inset: 24% 23% 30%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+}
+
+.worldNoteText {
+  position: absolute;
+  inset: 27% 25% 34%;
+  overflow: hidden;
+  color: #2b1b0d;
+  font-size: clamp(0.38rem, 0.82vw, 0.62rem);
+  font-weight: 800;
+  text-align: left;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.sleepOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at center, transparent 18%, rgba(0, 0, 0, 0.2) 44%, rgba(0, 0, 0, 0.62) 100%),
+    rgba(6, 8, 18, 0.34);
+}
+
+.deathOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.86);
+  pointer-events: auto;
+}
+
+.deathPanel {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  color: #f7f1df;
+  text-align: center;
+}
+
+.deathPanel strong {
+  font-size: clamp(3.5rem, 13vw, 9rem);
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.deathPanel button {
+  min-height: 46px;
+  padding: 0 28px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: #130f08;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  cursor: pointer;
+  font-weight: 950;
+  text-transform: uppercase;
+  pointer-events: auto;
+}
+
+.petFallback {
+  position: absolute;
+  inset: 13% 13% 9%;
+  display: grid;
+  place-items: center;
+  border: 4px solid rgba(255, 255, 255, 0.42);
+  border-radius: 45% 45% 38% 38%;
+  background:
+    radial-gradient(circle at 36% 38%, #201a18 0 3%, transparent 4%),
+    radial-gradient(circle at 64% 38%, #201a18 0 3%, transparent 4%),
+    radial-gradient(circle at 50% 56%, #ff8fab 0 4%, transparent 5%),
+    linear-gradient(145deg, #f8c35b, #c16f35);
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.statusPanel {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  z-index: 8;
+  width: min(230px, calc(100% - 36px));
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  transition: opacity 120ms ease;
+}
+
+.statusPanel.dimmed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.focusPanel {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  z-index: 12;
+  width: min(310px, calc(100% - 48px));
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 20, 30, 0.82);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+  overflow: visible;
+}
+
+.nameEditor {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.nameEditor input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 0 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  font: inherit;
+  font-size: clamp(1.3rem, 3vw, 2rem);
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  caret-color: auto;
+  user-select: text;
+}
+
+.bigStats {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.bigStats .statTrack {
+  height: 7px;
+  width: 100%;
+}
+
+.categoryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.categoryGrid.threeCategories .categoryButton:last-child {
+  grid-column: 1 / -1;
+}
+
+.categoryButton {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-height: 86px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.categoryButton:hover {
+  border-color: rgba(255, 209, 102, 0.9);
+  background: rgba(255, 209, 102, 0.16);
+}
+
+.categoryIcon {
+  position: relative;
+  width: 62px;
+  aspect-ratio: 1;
+}
+
+.categoryIcon img {
+  object-fit: contain;
+}
+
+.itemTray {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: max-content;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.itemTray.inlineInventory {
+  position: static;
+  width: 100%;
+  margin-top: 10px;
+  transform: none;
+}
+
+.itemTray.fullInventory {
+  min-height: 210px;
+  align-content: center;
+}
+
+.itemTrayBubble {
+  position: relative;
+  width: 64px;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 22%, rgba(255, 255, 255, 0.22), transparent 28%),
+    rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  touch-action: none;
+}
+
+.fullInventory .itemTrayBubble {
+  width: 86px;
+}
+
+.itemTrayBubble:active {
+  cursor: grabbing;
+}
+
+.itemTrayBubbles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.itemTrayFallback {
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 950;
+}
+
+.itemTrayImage {
+  object-fit: contain;
+  padding: 12px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.noteEditorOverlay,
+.noteViewerOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.52);
+  pointer-events: auto;
+}
+
+.noteEditorPanel,
+.noteViewerPanel {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  width: min(430px, calc(100vw - 36px));
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  background: rgba(15, 20, 30, 0.92);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+
+.noteViewerTimestamp {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.noteEditorPanel strong {
+  font-size: 1.1rem;
+}
+
+.noteCanvas {
+  width: 100%;
+  aspect-ratio: 360 / 260;
+  border-radius: 14px;
+  background: #fff4a8;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.noteEditorPanel textarea {
+  min-height: 86px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  caret-color: auto;
+  user-select: text;
+}
+
+.noteTools,
+.noteActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.noteTools label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.noteActions button {
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0 16px;
+  color: #241b06;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  cursor: pointer;
+  font-weight: 950;
+}
+
+.noteActions .removeNoteButton {
+  color: #fff7f7;
+  background: linear-gradient(135deg, #ef476f, #9b1d3f);
+}
+
+.noteViewerPaper {
+  width: min(360px, calc(100vw - 68px));
+  aspect-ratio: 1;
+}
+
+.noteViewerPaper p {
+  position: absolute;
+  inset: 15% 12% 20%;
+  overflow: auto;
+  margin: 0;
+  color: #2b1b0d;
+  font-size: 1.05rem;
+  font-weight: 850;
+  white-space: pre-wrap;
+}
+
+.focusActions {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.focusAction {
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #241b06;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  cursor: pointer;
+  font-weight: 950;
+}
+
+.closeFocus {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255, 209, 102, 0.16);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.petName {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.petName strong {
+  font-size: 0.92rem;
+}
+
+.pill {
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.statList {
+  display: grid;
+  gap: 5px;
+}
+
+.statRow {
+  display: grid;
+  grid-template-columns: 32px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.statTrack {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.statFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+}
+
+.statFill.energy {
+  background: linear-gradient(90deg, #6c63ff, #77e4ff);
+}
+
+.statFill.mood {
+  background: linear-gradient(90deg, var(--danger), #ffb3c7);
+}
+
+.statPercent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.statIcon {
+  position: relative;
+  display: block;
+  width: 32px;
+  aspect-ratio: 1;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
+}
+
+.statIcon img {
+  object-fit: contain;
+}
+
+.controls {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.controlGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.alignRight {
+  justify-content: flex-end;
+}
+
+.settingsPanel {
+  position: absolute;
+  right: 24px;
+  bottom: 82px;
+  z-index: 12;
+  display: grid;
+  gap: 12px;
+  width: min(340px, calc(100vw - 48px));
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  background: rgba(15, 20, 30, 0.88);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.34);
+}
+
+.petSlot {
+  display: grid;
+  gap: 8px;
+}
+
+.petSlotHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.petSlotHeader strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.petVariantList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.petVariantList button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.petVariantList button.active {
+  border-color: rgba(255, 209, 102, 0.9);
+  background: rgba(255, 209, 102, 0.16);
+}
+
+.petVariantList .removePetButton {
+  color: #fff7f7;
+  background: rgba(239, 71, 111, 0.22);
+}
+
+.actionButton,
+.cameraFollowButton,
+.iconControlButton,
+.stateButton,
+.select {
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+}
+
+.actionButton,
+.cameraFollowButton,
+.iconControlButton,
+.stateButton {
+  padding: 0 16px;
+  font-weight: 800;
+}
+
+.actionButton:hover,
+.cameraFollowButton:hover,
+.iconControlButton:hover,
+.stateButton:hover,
+.select:hover,
+.cameraFollowButton.active,
+.iconControlButton.active,
+.stateButton.active {
+  border-color: rgba(255, 209, 102, 0.9);
+  background: rgba(255, 209, 102, 0.16);
+}
+
+.cameraFollowButton {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--accent);
+  background: rgba(15, 20, 30, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.iconControlButton {
+  position: relative;
+  width: 42px;
+  min-height: 42px;
+  padding: 8px;
+  color: var(--accent);
+  background: rgba(15, 20, 30, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.iconControlButton img {
+  object-fit: contain;
+}
+
+.select {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--text);
+  background: rgba(15, 20, 30, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.select option {
+  color: var(--text);
+  background: #151a25;
+}
+
+.stage img,
+.sceneWorld img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+@media (max-width: 760px) {
+  .controls {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .settingsPanel {
+    right: 14px;
+    bottom: 72px;
+    width: min(340px, calc(100vw - 28px));
+  }
+
+  .stage {
+    min-height: 100vh;
+  }
+
+  .petSprite {
+    width: min(70vw, 300px);
+  }
+
+  .statusPanel {
+    top: 14px;
+    left: 14px;
+    width: min(300px, calc(100% - 28px));
+  }
+
+}
+
+@keyframes petJump {
+  0%,
+  100% {
+    translate: -50% -100%;
+  }
+
+  45% {
+    translate: -50% -142%;
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "haustier",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate-assets": "node scripts/generate-assets.mjs",
+    "predev": "npm run generate-assets",
+    "dev": "next dev",
+    "prebuild": "npm run generate-assets",
+    "build": "next build",
+    "start": "next start",
+    "prelint": "npm run generate-assets",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "next": "^16.2.6",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
+    "typescript": "^6.0.3"
+  }
+}
