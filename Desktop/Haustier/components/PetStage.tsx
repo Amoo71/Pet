@@ -81,6 +81,7 @@ const BALL_GRAVITY = 95;
 const ITEM_GRAVITY = 110;
 const SYNC_INTERVAL_MS = 250;
 const SYNC_DEBOUNCE_MS = 90;
+const LOCAL_INTERACTION_PROTECT_MS = 1400;
 const NAME_SAVE_DEBOUNCE_MS = 2000;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
@@ -174,6 +175,8 @@ export function PetStage() {
   const latestVersion = useRef(0);
   const applyingRemote = useRef(false);
   const syncReady = useRef(false);
+  const localInteractionActive = useRef(false);
+  const localInteractionProtectUntil = useRef(0);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextClick = useRef(false);
@@ -277,7 +280,9 @@ export function PetStage() {
   }
 
   function markCare(kind: "fed" | "played" | "slept") {
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
+    protectLocalInteraction(now);
     updateSelectedPet((pet) => ({
       ...pet,
       lastInteractionAt: now,
@@ -292,7 +297,18 @@ export function PetStage() {
   }
 
   function markInteraction() {
-    updateSelectedPet((pet) => ({ ...pet, lastInteractionAt: Date.now() }));
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now();
+    protectLocalInteraction(now);
+    updateSelectedPet((pet) => ({ ...pet, lastInteractionAt: now }));
+  }
+
+  function protectLocalInteraction(now: number) {
+    localInteractionProtectUntil.current = now + LOCAL_INTERACTION_PROTECT_MS;
+  }
+
+  function isLocalInteractionProtected() {
+    return Date.now() < localInteractionProtectUntil.current || localInteractionActive.current;
   }
 
   function buildSharedState(): SharedGameState {
@@ -378,6 +394,10 @@ export function PetStage() {
       if (!response.ok) return;
 
       const savedState = (await response.json()) as SharedGameState;
+      if (isLocalInteractionProtected()) {
+        latestVersion.current = Math.max(latestVersion.current, savedState.version);
+        return;
+      }
       applyRemoteState(savedState);
     } catch {
       // Offline/local server refresh: keep playing locally, next sync will catch up.
@@ -472,6 +492,10 @@ export function PetStage() {
   }, [petName, selectedPetId]);
 
   useEffect(() => {
+    localInteractionActive.current = ballDragging || foodDragging || bedDragging || noteDragging || foodSettling || bedSettling || noteEditorOpen;
+  }, [ballDragging, foodDragging, bedDragging, noteDragging, foodSettling, bedSettling, noteEditorOpen]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const pullState = async () => {
@@ -481,6 +505,7 @@ export function PetStage() {
 
         const remoteState = (await response.json()) as SharedGameState;
         if (cancelled) return;
+        if (isLocalInteractionProtected()) return;
         if (remoteState.updatedBy !== clientId.current && remoteState.version > latestVersion.current) applyRemoteState(remoteState);
       } catch {
         // Local dev can briefly lose the server during refreshes.
@@ -1335,6 +1360,7 @@ export function PetStage() {
     setFocusedPet(false);
     setBallTransitionMs(0);
     ballThrownByPlayer.current = false;
+    // eslint-disable-next-line react-hooks/purity
     fetchJumpEnabled.current = Math.random() < FETCH_JUMP_CHANCE;
 
     const start = petPosition;
@@ -1390,6 +1416,7 @@ export function PetStage() {
     if (!foodVisible || foodDragging || !foodSettling) return;
 
     let animationFrame = 0;
+    // eslint-disable-next-line react-hooks/purity
     let lastTick = performance.now();
 
     const tick = (now: number) => {
@@ -1444,6 +1471,7 @@ export function PetStage() {
     if (!bedVisible || bedDragging || !bedSettling) return;
 
     let animationFrame = 0;
+    // eslint-disable-next-line react-hooks/purity
     let lastTick = performance.now();
 
     const tick = (now: number) => {
@@ -1498,6 +1526,7 @@ export function PetStage() {
     if (!ballVisible || ballDragging) return;
 
     let animationFrame = 0;
+    // eslint-disable-next-line react-hooks/purity
     let lastTick = performance.now();
 
     const tick = (now: number) => {

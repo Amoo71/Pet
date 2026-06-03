@@ -41,7 +41,7 @@ export async function PUT(request: Request) {
     ball: { ...current.ball, ...incoming.ball },
     food: { ...current.food, ...incoming.food },
     bed: { ...current.bed, ...incoming.bed },
-    notes: incoming.notes ?? current.notes,
+    notes: mergeNotes(current.notes, incoming.notes, incoming.version ?? -1, current.version),
     version: current.version + 1,
     updatedAt: Date.now(),
     updatedBy: incoming.updatedBy ?? "unknown"
@@ -291,12 +291,36 @@ function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
       return;
     }
 
-    if ((incomingPet.updatedAt ?? 0) >= (nextPets[index].updatedAt ?? 0)) {
-      nextPets[index] = incomingPet;
+    const currentPet = nextPets[index];
+    const incomingInteractionAt = incomingPet.lastInteractionAt ?? 0;
+    const currentInteractionAt = currentPet.lastInteractionAt ?? 0;
+
+    const incomingUpdatedAt = incomingPet.updatedAt ?? 0;
+    const currentUpdatedAt = currentPet.updatedAt ?? 0;
+
+    if (incomingUpdatedAt >= currentUpdatedAt || incomingInteractionAt >= currentInteractionAt) {
+      nextPets[index] = incomingUpdatedAt >= currentUpdatedAt ? incomingPet : {
+        ...incomingPet,
+        name: currentPet.name,
+        assetKey: currentPet.assetKey
+      };
     }
   });
 
   return nextPets.slice(0, 2).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function mergeNotes(currentNotes: SharedGameState["notes"], incomingNotes: SharedGameState["notes"] | undefined, incomingVersion: number, currentVersion: number) {
+  if (!incomingNotes) return currentNotes;
+  if (incomingVersion >= currentVersion) return incomingNotes;
+
+  const notesById = new Map(currentNotes.map((note) => [note.id, note]));
+  incomingNotes.forEach((note) => {
+    const currentNote = notesById.get(note.id);
+    if (!currentNote || note.createdAt >= currentNote.createdAt) notesById.set(note.id, note);
+  });
+
+  return Array.from(notesById.values()).sort((a, b) => a.createdAt - b.createdAt);
 }
 
 function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
