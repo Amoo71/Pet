@@ -295,7 +295,7 @@ function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
 }
 
 function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
-  const nextPets = state.pets.map((pet) => applyPetLifecycle(applyPetAutonomy(pet, now), now));
+  const nextPets = state.pets.map((pet) => applyPetLifecycle(applyPetAutonomy(normalizePetMotion(pet, now), now), now));
   const petsChanged = nextPets.some((pet, index) => pet !== state.pets[index]);
   const primaryPet = nextPets[0];
   const baseState = petsChanged && primaryPet ? {
@@ -351,6 +351,30 @@ function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
     food: statDeath || missedCare ? { ...baseState.food, visible: false } : baseState.food,
     bed: statDeath || missedCare ? { ...baseState.bed, visible: false, sleepEndsAt: 0, sleepOwnerId: "server" } : baseState.bed
   };
+}
+
+function normalizePetMotion(pet: SharedPet, now: number): SharedPet {
+  if (pet.lifecycle.deadAt > 0 || pet.state === "sleep" || pet.pendingRoomId) return pet;
+
+  if (pet.state === "laufen" && pet.walkDurationMs > 0 && now - pet.updatedAt >= pet.walkDurationMs + 250) {
+    return {
+      ...pet,
+      updatedAt: now,
+      state: "stehen",
+      walkDurationMs: 0
+    };
+  }
+
+  if (pet.state === "stehen" && now - pet.updatedAt >= 3_000) {
+    return {
+      ...pet,
+      updatedAt: now,
+      state: "sitzen",
+      walkDurationMs: 0
+    };
+  }
+
+  return pet;
 }
 
 function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {

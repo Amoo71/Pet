@@ -101,7 +101,6 @@ export function PetStage() {
   const [focusedPet, setFocusedPet] = useState(false);
   const [cameraFollowsPet, setCameraFollowsPet] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [activeInventoryCategory, setActiveInventoryCategory] = useState<InventoryCategory | null>(null);
   const [selectedPetId, setSelectedPetId] = useState<SharedPet["id"]>("pet1");
   const [pets, setPets] = useState<SharedPet[]>([createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo")]);
@@ -468,11 +467,19 @@ export function PetStage() {
 
   useEffect(() => {
     if (!cameraFollowsPet) return;
+    if (selectedPet.roomId !== backgroundId) {
+      const animationFrame = requestAnimationFrame(() => {
+        setBackgroundId(selectedPet.roomId);
+        setScenePan({ x: 0, y: 0 });
+      });
+      return () => cancelAnimationFrame(animationFrame);
+    }
+
     const animationFrame = requestAnimationFrame(() => {
       setScenePan(getFocusPan(petPosition, zoom));
     });
     return () => cancelAnimationFrame(animationFrame);
-  }, [cameraFollowsPet, petPosition, zoom]);
+  }, [backgroundId, cameraFollowsPet, petPosition, selectedPet.roomId, zoom]);
 
   useEffect(() => {
     if (!noteEditorOpen) return;
@@ -766,7 +773,6 @@ export function PetStage() {
     setScenePan({ x: 0, y: 0 });
     setBackgroundId(nextBackgroundId);
     setPetRoomId(nextBackgroundId);
-    setMenuOpen(false);
     setSettingsOpen(false);
   };
 
@@ -875,7 +881,6 @@ export function PetStage() {
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setSettingsOpen(false);
-    setMenuOpen(false);
     setCameraFollowsPet(true);
     setZoom(1);
     requestAnimationFrame(() => setScenePan(getFocusPan(nextPet.position, 1)));
@@ -884,7 +889,6 @@ export function PetStage() {
   const toggleCameraFollow = () => {
     setFocusedPet(false);
     setActiveInventoryCategory(null);
-    setMenuOpen(false);
     setCameraFollowsPet((current) => {
       const next = !current;
       if (next) {
@@ -1794,28 +1798,13 @@ export function PetStage() {
           </section>
         ) : null}
 
-        {!focusedPet ? (
-          <div className="controls" aria-label="Controls">
-            <button
-              aria-label="Open controls"
-              aria-expanded={menuOpen}
-              className={`menuToggleButton${menuOpen ? " active" : ""}`}
-              onClick={() => setMenuOpen((current) => !current)}
-              title="Controls"
-              type="button"
-            >
-              {"///"}
-            </button>
-            {menuOpen ? (
-              <div className="controlMenu" aria-label="Control menu">
+        <div className="controls" aria-label="Controls">
+          <div className="controlMenu" aria-label="Control menu">
                 <button
                   aria-label="Settings"
                   aria-pressed={settingsOpen}
                   className={`iconControlButton${settingsOpen ? " active" : ""}`}
-                  onClick={() => {
-                    setSettingsOpen((current) => !current);
-                    setMenuOpen(false);
-                  }}
+                  onClick={() => setSettingsOpen((current) => !current)}
                   title="Settings"
                   type="button"
                 >
@@ -1838,10 +1827,8 @@ export function PetStage() {
                     </option>
                   ))}
                 </select>
-              </div>
-            ) : null}
           </div>
-        ) : null}
+        </div>
 
       </section>
     </main>
