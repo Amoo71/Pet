@@ -1733,11 +1733,6 @@ export function PetStage() {
               <button className="petNameButton" disabled={!canSwitchPet} onClick={canSwitchPet ? switchSelectedPet : undefined} title="Switch pet" type="button">
                 {petName}
               </button>
-              {canSwitchPet ? (
-                <button className="petSwitchButton" onClick={switchSelectedPet} title="Switch pet" type="button" aria-label="Switch pet">
-                  ›
-                </button>
-              ) : null}
             </div>
             <div className="statList">
               <StatBar className="hunger" icon={HUNGER_ICON} label="Hunger" value={stats.hunger} />

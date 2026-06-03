@@ -798,20 +798,6 @@ input {
   cursor: default;
 }
 
-.petSwitchButton {
-  width: auto;
-  height: auto;
-  border: 0;
-  border-radius: 0;
-  color: #fff;
-  background: transparent;
-  cursor: pointer;
-  font-size: 1.35rem;
-  font-weight: 950;
-  line-height: 1;
-  padding: 0 2px;
-}
-
 .pill {
   padding: 5px 9px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -1106,10 +1092,6 @@ input {
   .petNameButton {
     max-width: 106px;
     font-size: 0.82rem;
-  }
-
-  .petSwitchButton {
-    font-size: 1.1rem;
   }
 
   .statList {
