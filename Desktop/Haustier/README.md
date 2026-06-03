@@ -36,7 +36,13 @@ public/assets/items/bett.png
 
 ## Online State On Vercel
 
-For real shared online/live state, connect Vercel KV or Upstash Redis and set these environment variables in Vercel Project Settings:
+For real shared online/live state, connect Vercel Redis and set this environment variable in Vercel Project Settings:
+
+```text
+REDIS_URL=...
+```
+
+REST-based Vercel KV or Upstash Redis variables also work:
 
 ```text
 KV_REST_API_URL=...

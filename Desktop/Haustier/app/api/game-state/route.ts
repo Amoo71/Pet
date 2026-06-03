@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { createClient, type RedisClientType } from "redis";
 import { BACKGROUNDS } from "@/lib/gameConfig";
 import { DEFAULT_SHARED_GAME_STATE, type SharedGameState, type SharedPet } from "@/lib/sharedGameState";
 
@@ -9,6 +10,7 @@ export const runtime = "nodejs";
 const stateFile = path.join(process.cwd(), ".data", "game-state.json");
 const stateKey = "haustier:game-state";
 let memoryState: SharedGameState = DEFAULT_SHARED_GAME_STATE;
+let redisClientPromise: Promise<RedisClientType> | null = null;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DECAY_STEP_MS = 4 * 60 * 60 * 1000;
 const DECAY_PER_STEP = 1;
@@ -128,6 +130,9 @@ async function readFileState() {
 }
 
 async function readRemoteState() {
+  const redisState = await readRedisUrlState();
+  if (redisState) return redisState;
+
   const config = getRemoteStateConfig();
   if (!config) return null;
 
@@ -147,6 +152,8 @@ async function readRemoteState() {
 }
 
 async function writeRemoteState(state: SharedGameState) {
+  if (await writeRedisUrlState(state)) return true;
+
   const config = getRemoteStateConfig();
   if (!config) return false;
 
@@ -169,6 +176,38 @@ function getRemoteStateConfig() {
   const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
   return url && token ? { url: url.replace(/\/$/, ""), token } : null;
+}
+
+async function getRedisUrlClient() {
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+
+  redisClientPromise ??= createClient({ url }).connect() as Promise<RedisClientType>;
+  return redisClientPromise;
+}
+
+async function readRedisUrlState() {
+  try {
+    const client = await getRedisUrlClient();
+    if (!client) return null;
+
+    const value = await client.get(stateKey);
+    return value ? JSON.parse(value) as Partial<SharedGameState> : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRedisUrlState(state: SharedGameState) {
+  try {
+    const client = await getRedisUrlClient();
+    if (!client) return false;
+
+    await client.set(stateKey, JSON.stringify(state));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getDefaultLifecycle(now: number) {
