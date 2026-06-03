@@ -176,7 +176,7 @@ input {
   left: var(--target-x, 50%);
   top: var(--target-y, 82%);
   z-index: 5;
-  width: clamp(26px, 3.4vw, 52px);
+  width: clamp(38px, 5vw, 74px);
   aspect-ratio: 1;
   translate: -50% -92%;
   background-image: url("/assets/backgrounds/UI/position.png");
@@ -445,15 +445,20 @@ input {
 
 .statusPanel {
   position: absolute;
-  top: 24px;
-  left: 24px;
+  top: 18px;
+  left: 50%;
   z-index: 8;
-  width: min(230px, calc(100% - 36px));
-  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: min(760px, calc(100% - 32px));
+  padding: 8px 10px;
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
+  border-radius: 999px;
   background: var(--panel-bg);
   backdrop-filter: blur(16px);
+  transform: translateX(-50%);
   transition: opacity 120ms ease;
 }
 
@@ -767,9 +772,30 @@ input {
 .petName {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  justify-content: center;
+  gap: 6px;
+  min-width: 118px;
+  margin-bottom: 0;
+}
+
+.petNameButton {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 950;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.petNameButton:disabled {
+  cursor: default;
 }
 
 .petSwitchButton {
@@ -786,10 +812,6 @@ input {
   padding: 0 2px;
 }
 
-.petName strong {
-  font-size: 0.92rem;
-}
-
 .pill {
   padding: 5px 9px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -801,15 +823,20 @@ input {
 }
 
 .statList {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .statRow {
   display: grid;
-  grid-template-columns: 32px 1fr 44px;
+  grid-template-columns: 24px minmax(44px, 1fr) 34px;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
 }
 
 .statTrack {
@@ -837,7 +864,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 42px;
+  min-width: 34px;
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 500;
@@ -846,7 +873,7 @@ input {
 .statIcon {
   position: relative;
   display: block;
-  width: 32px;
+  width: 24px;
   aspect-ratio: 1;
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
 }
@@ -1064,11 +1091,29 @@ input {
   }
 
   .statusPanel {
-    top: 14px;
-    left: 14px;
-    width: min(230px, calc(100% - 28px));
-    padding: 8px;
-    border-radius: 14px;
+    top: 10px;
+    left: 50%;
+    width: min(520px, calc(100% - 12px));
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 999px;
+  }
+
+  .petName {
+    min-width: 92px;
+  }
+
+  .petNameButton {
+    max-width: 106px;
+    font-size: 0.82rem;
+  }
+
+  .petSwitchButton {
+    font-size: 1.1rem;
+  }
+
+  .statList {
+    gap: 5px;
   }
 
   .focusPanel {
@@ -1096,17 +1141,17 @@ input {
   }
 
   .statRow {
-    grid-template-columns: 26px 1fr 36px;
-    gap: 6px;
+    grid-template-columns: 20px minmax(28px, 1fr) 28px;
+    gap: 3px;
   }
 
   .statIcon {
-    width: 26px;
+    width: 20px;
   }
 
   .statPercent {
-    min-width: 36px;
-    font-size: 0.62rem;
+    min-width: 28px;
+    font-size: 0.56rem;
   }
 
   .iconControlButton {

@@ -37,7 +37,7 @@ const initialLifecycle = {
   deadAt: 0
 };
 
-const MOVEMENT_AREA = { minY: 70, maxY: 88 };
+const MOVEMENT_AREA = { minY: 72, maxY: 88 };
 const SKY_BACKGROUNDS = new Set(["wiese", "Wiese"]);
 const PET_HEAD_OFFSET = 20;
 const PET_HEAD_CLICK_RANGE = 8;
@@ -87,6 +87,7 @@ const NAME_SAVE_DEBOUNCE_MS = 2000;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
 const SLEEP_DURATION_MS = 10_000;
+const MIN_ZOOM = 0.82;
 const WHEEL_ZOOM_STEP = 0.025;
 const BED_WALK_INTO_OFFSET_Y = 10;
 const BED_SLEEP_OFFSET_Y = 3;
@@ -477,7 +478,7 @@ export function PetStage() {
 
     if (window.matchMedia("(max-width: 760px)").matches) {
       requestAnimationFrame(() => {
-        setZoom(0.88);
+        setZoom(MIN_ZOOM);
         setScenePan({ x: 0, y: 0 });
       });
     }
@@ -636,6 +637,7 @@ export function PetStage() {
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (cameraFollowsPet) setCameraFollowsPet(false);
     const panLimits = getScenePanLimits(zoom);
 
     if (!cameraFollowsPet && !event.ctrlKey && zoom === 1 && (panLimits.maxX > 0 || panLimits.maxY > 0)) {
@@ -651,7 +653,7 @@ export function PetStage() {
     setZoom((current) => {
       const nextZoom = clampZoom(current + direction);
       setScenePan((currentPan) => {
-        if (cameraFollowsPet || focusedPet) return getFocusPan(petPosition, nextZoom, focusedPet);
+        if (focusedPet) return getFocusPan(petPosition, nextZoom, true);
         return clampScenePan(currentPan, nextZoom);
       });
       return nextZoom;
@@ -830,7 +832,7 @@ export function PetStage() {
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (isDead) return;
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote, .petSprite")) return;
-    if (cameraFollowsPet) return;
+    if (cameraFollowsPet) setCameraFollowsPet(false);
     event.preventDefault();
     stagePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -1728,7 +1730,9 @@ export function PetStage() {
 
           <section className={`statusPanel${focusedPet ? " dimmed" : ""}`} aria-label="Pet status">
             <div className="petName">
-              <strong>{petName}</strong>
+              <button className="petNameButton" disabled={!canSwitchPet} onClick={canSwitchPet ? switchSelectedPet : undefined} title="Switch pet" type="button">
+                {petName}
+              </button>
               {canSwitchPet ? (
                 <button className="petSwitchButton" onClick={switchSelectedPet} title="Switch pet" type="button" aria-label="Switch pet">
                   ›
@@ -1999,7 +2003,7 @@ function clampStat(value: number) {
 }
 
 function clampZoom(value: number) {
-  return Math.round(Math.max(0.82, Math.min(4, value)) * 100) / 100;
+  return Math.round(Math.max(MIN_ZOOM, Math.min(4, value)) * 100) / 100;
 }
 
 function clampPosition(value: number, min: number, max: number) {
