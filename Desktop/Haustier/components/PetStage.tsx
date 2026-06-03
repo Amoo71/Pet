@@ -84,6 +84,7 @@ const SYNC_INTERVAL_MS = 250;
 const SYNC_DEBOUNCE_MS = 90;
 const LOCAL_INTERACTION_PROTECT_MS = 1400;
 const NAME_SAVE_DEBOUNCE_MS = 2000;
+const SETTINGS_HOLD_MS = 5_000;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
 const SLEEP_DURATION_MS = 10_000;
@@ -183,6 +184,8 @@ export function PetStage() {
   const localInteractionProtectUntil = useRef(0);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsHoldTriggered = useRef(false);
   const suppressNextClick = useRef(false);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
@@ -489,6 +492,7 @@ export function PetStage() {
       if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
       if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
+      if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
     };
   }, []);
 
@@ -638,7 +642,14 @@ export function PetStage() {
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (cameraFollowsPet) setCameraFollowsPet(false);
+    if (cameraFollowsPet) {
+      setCameraFollowsPet(false);
+      if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
+        setZoom(MIN_ZOOM);
+        setScenePan((currentPan) => clampScenePan(currentPan, MIN_ZOOM));
+        return;
+      }
+    }
     const panLimits = getScenePanLimits(zoom);
 
     if (!cameraFollowsPet && !event.ctrlKey && zoom === 1 && (panLimits.maxX > 0 || panLimits.maxY > 0)) {
@@ -833,7 +844,13 @@ export function PetStage() {
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (isDead) return;
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote, .petSprite")) return;
-    if (cameraFollowsPet) setCameraFollowsPet(false);
+    if (cameraFollowsPet) {
+      setCameraFollowsPet(false);
+      if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
+        setZoom(MIN_ZOOM);
+        setScenePan((currentPan) => clampScenePan(currentPan, MIN_ZOOM));
+      }
+    }
     event.preventDefault();
     stagePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -940,6 +957,11 @@ export function PetStage() {
   };
 
   const toggleCameraFollow = () => {
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      return;
+    }
+
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setSettingsOpen(false);
@@ -955,6 +977,36 @@ export function PetStage() {
       }
       return next;
     });
+  };
+
+  const startSettingsHold = (event: PointerEvent<HTMLButtonElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    settingsHoldTriggered.current = false;
+    if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
+
+    settingsHoldTimer.current = setTimeout(() => {
+      settingsHoldTriggered.current = true;
+      setFocusedPet(false);
+      setActiveInventoryCategory(null);
+      setCameraFollowsPet(false);
+      setSettingsOpen((current) => !current);
+      settingsHoldTimer.current = null;
+    }, SETTINGS_HOLD_MS);
+  };
+
+  const finishSettingsHold = (event: PointerEvent<HTMLButtonElement>) => {
+    if (settingsHoldTimer.current) clearTimeout(settingsHoldTimer.current);
+    settingsHoldTimer.current = null;
+    event.currentTarget.blur();
+  };
+
+  const handleCameraButtonClick = () => {
+    if (settingsHoldTriggered.current) {
+      settingsHoldTriggered.current = false;
+      return;
+    }
+
+    toggleCameraFollow();
   };
 
   const togglePetSlot = (slotId: SharedPet["id"], assetKey: string) => {
@@ -1873,25 +1925,18 @@ export function PetStage() {
           <div className="controls" aria-label="Controls">
             <div className="controlMenu" aria-label="Control menu">
                 <button
-                  aria-label="Settings"
-                  aria-pressed={settingsOpen}
-                  className={`iconControlButton${settingsOpen ? " active" : ""}`}
-                  onClick={() => setSettingsOpen((current) => !current)}
-                  title="Settings"
+                  aria-label={settingsOpen ? "Settings" : "Follow pet camera"}
+                  aria-pressed={settingsOpen || cameraFollowsPet}
+                  className={`iconControlButton cameraFollowButton${settingsOpen || cameraFollowsPet ? " active" : ""}`}
+                  onClick={handleCameraButtonClick}
+                  onPointerCancel={finishSettingsHold}
+                  onPointerDown={startSettingsHold}
+                  onPointerLeave={finishSettingsHold}
+                  onPointerUp={finishSettingsHold}
+                  title="Follow pet camera. Hold 5 seconds for settings."
                   type="button"
                 >
-                  <NextImage alt="" draggable={false} fill sizes="36px" src={SETTINGS_ICON} />
-                </button>
-                <button
-                  aria-label="Follow pet camera"
-                  aria-pressed={cameraFollowsPet}
-                  className={`iconControlButton cameraFollowButton${cameraFollowsPet ? " active" : ""}`}
-                  onClick={toggleCameraFollow}
-                  onPointerUp={(event) => event.currentTarget.blur()}
-                  title="Follow pet camera"
-                  type="button"
-                >
-                  <NextImage alt="" draggable={false} fill sizes="36px" src={CAM_ICON} />
+                  <NextImage alt="" draggable={false} fill sizes="36px" src={settingsOpen ? SETTINGS_ICON : CAM_ICON} />
                 </button>
                 <select className="select" disabled={isDead} onChange={(event) => changeBackground(event.target.value)} value={backgroundId}>
                   {BACKGROUNDS.map((background) => (
