@@ -22,6 +22,7 @@ export type PetLifecycle = {
 
 export type SharedPet = {
   id: "pet1" | "pet2";
+  updatedAt: number;
   assetKey: string;
   name: string;
   stats: PetStats;
@@ -116,6 +117,7 @@ export const DEFAULT_SHARED_GAME_STATE: SharedGameState = {
   pets: [
     {
       id: "pet1",
+      updatedAt: Date.now(),
       assetKey: "pet",
       name: "Momo",
       stats: {

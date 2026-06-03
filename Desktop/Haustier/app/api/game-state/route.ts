@@ -185,6 +185,7 @@ function getDefaultLifecycle(now: number) {
 function getDefaultPet(id: SharedPet["id"], assetKey: string, name: string, now: number): SharedPet {
   return {
     id,
+    updatedAt: now,
     assetKey,
     name,
     stats: { ...DEFAULT_SHARED_GAME_STATE.stats },
@@ -237,7 +238,21 @@ function normalizePets(state: Partial<SharedGameState>, now: number) {
 
 function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
   if (!incomingPets) return currentPets;
-  return incomingPets.slice(0, 2);
+  const nextPets = [...currentPets];
+
+  incomingPets.slice(0, 2).forEach((incomingPet) => {
+    const index = nextPets.findIndex((pet) => pet.id === incomingPet.id);
+    if (index < 0) {
+      nextPets.push(incomingPet);
+      return;
+    }
+
+    if ((incomingPet.updatedAt ?? 0) >= (nextPets[index].updatedAt ?? 0)) {
+      nextPets[index] = incomingPet;
+    }
+  });
+
+  return nextPets.slice(0, 2).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
@@ -305,6 +320,7 @@ function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {
     if (now < pet.autoExitAt) return pet;
     return {
       ...pet,
+      updatedAt: now,
       roomId: pet.pendingRoomId,
       state: "laufen",
       position: { x: pet.pendingRoomDirection > 0 ? 24 : 76, y: ROOM_EDGE_TARGET_Y },
@@ -323,11 +339,11 @@ function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {
   const nextAutoAt = now;
 
   if (roll < 0.2) {
-    return { ...pet, state: "sitzen", walkDurationMs: 0, lastAutoAt: nextAutoAt };
+    return { ...pet, updatedAt: now, state: "sitzen", walkDurationMs: 0, lastAutoAt: nextAutoAt };
   }
 
   if (roll < 0.36) {
-    return { ...pet, state: "stehen", walkDurationMs: 0, lastAutoAt: nextAutoAt };
+    return { ...pet, updatedAt: now, state: "stehen", walkDurationMs: 0, lastAutoAt: nextAutoAt };
   }
 
   const direction = seed % 2 === 0 ? -1 : 1;
@@ -340,6 +356,7 @@ function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {
     const walkDurationMs = getWalkDuration(pet.position, exitTarget);
     return {
       ...pet,
+      updatedAt: now,
       state: "laufen",
       position: exitTarget,
       facing: direction,
@@ -355,6 +372,7 @@ function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {
   const nextY = 72 + ((seed >> 7) % 15);
   return {
     ...pet,
+    updatedAt: now,
     state: "laufen",
     position: { x: nextX, y: nextY },
     facing: nextX < pet.position.x ? -1 : 1,
@@ -384,6 +402,7 @@ function applyPetLifecycle(pet: SharedPet, now: number): SharedPet {
   if (!dead && decaySteps <= 0) return pet;
   return {
     ...pet,
+    updatedAt: now,
     stats: dead ? { hunger: 0, energy: 0, mood: 0 } : stats,
     lifecycle: {
       ...pet.lifecycle,

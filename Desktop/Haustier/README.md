@@ -1,6 +1,6 @@
 # Pet
 
-Local base for a shared online pet. Later, the shared state can be moved to a Vercel database.
+Shared online pet game built with Next.js. The game state is synced through `/api/game-state` and can persist online through Vercel KV or Upstash Redis.
 
 ## Run Locally
 
@@ -32,4 +32,28 @@ Item PNG paths:
 public/assets/items/ball.png
 public/assets/items/steak.png
 public/assets/items/bett.png
+```
+
+## Online State On Vercel
+
+For real shared online/live state, connect Vercel KV or Upstash Redis and set these environment variables in Vercel Project Settings:
+
+```text
+KV_REST_API_URL=...
+KV_REST_API_TOKEN=...
+```
+
+If your provider exposes Upstash names instead, these also work:
+
+```text
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+```
+
+Without these variables, the app falls back to `.data/game-state.json`, which is only reliable for local development and not for real Vercel multiplayer persistence.
+
+When importing this repo on Vercel, set the project root directory to:
+
+```text
+Desktop/Haustier
 ```

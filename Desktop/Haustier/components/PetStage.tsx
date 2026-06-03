@@ -101,6 +101,7 @@ export function PetStage() {
   const [focusedPet, setFocusedPet] = useState(false);
   const [cameraFollowsPet, setCameraFollowsPet] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [activeInventoryCategory, setActiveInventoryCategory] = useState<InventoryCategory | null>(null);
   const [selectedPetId, setSelectedPetId] = useState<SharedPet["id"]>("pet1");
   const [pets, setPets] = useState<SharedPet[]>([createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo")]);
@@ -166,6 +167,8 @@ export function PetStage() {
   const fetchJumpEnabled = useRef(false);
   const lastBallDrag = useRef<{ point: Point; time: number } | null>(null);
   const stageDrag = useRef<{ startX: number; startY: number; startPan: Point } | null>(null);
+  const stagePointers = useRef(new Map<number, Point>());
+  const pinchGesture = useRef<{ distance: number; zoom: number; center: Point; pan: Point } | null>(null);
   const viewBeforeFocus = useRef<{ zoom: number; pan: Point }>({ zoom: 1, pan: { x: 0, y: 0 } });
   const clientId = useRef("client-pending");
   const latestVersion = useRef(0);
@@ -174,7 +177,7 @@ export function PetStage() {
   const suppressNextClick = useRef(false);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
-    setPets((currentPets) => currentPets.map((pet) => pet.id === selectedPetId ? updater(pet) : pet));
+    setPets((currentPets) => currentPets.map((pet) => pet.id === selectedPetId ? { ...updater(pet), updatedAt: Date.now() } : pet));
   };
 
   const setPetName = (name: string) => updateSelectedPet((pet) => ({ ...pet, name }));
@@ -247,6 +250,7 @@ export function PetStage() {
   const viewingNote = viewingNoteId ? notes.find((note) => note.id === viewingNoteId) : undefined;
   const isDead = lifecycle.deadAt > 0;
   const petsInRoom = pets.filter((pet) => pet.roomId === backgroundId);
+  const canSwitchPet = pets.length > 1;
 
   const clearTimers = () => {
     if (sitTimer.current) clearTimeout(sitTimer.current);
@@ -411,6 +415,13 @@ export function PetStage() {
       noteImage.onerror = () => setNoteImagesReady((current) => ({ ...current, [template]: false }));
       noteImage.src = src;
     });
+
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      requestAnimationFrame(() => {
+        setZoom(0.88);
+        setScenePan({ x: 0, y: 0 });
+      });
+    }
 
     return () => {
       clearTimers();
@@ -755,12 +766,30 @@ export function PetStage() {
     setScenePan({ x: 0, y: 0 });
     setBackgroundId(nextBackgroundId);
     setPetRoomId(nextBackgroundId);
+    setMenuOpen(false);
+    setSettingsOpen(false);
   };
 
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (isDead) return;
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote, .petSprite")) return;
     if (cameraFollowsPet) return;
+    event.preventDefault();
+    stagePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (stagePointers.current.size >= 2) {
+      const points = Array.from(stagePointers.current.values()).slice(0, 2);
+      pinchGesture.current = {
+        distance: getPointDistance(points[0], points[1]),
+        zoom,
+        center: getPointCenter(points[0], points[1]),
+        pan: scenePan
+      };
+      stageDrag.current = null;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     const panLimits = getScenePanLimits(zoom);
     if (panLimits.maxX <= 0 && panLimits.maxY <= 0) return;
 
@@ -769,6 +798,25 @@ export function PetStage() {
   };
 
   const dragStage = (event: PointerEvent<HTMLDivElement>) => {
+    if (stagePointers.current.has(event.pointerId)) {
+      stagePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
+    if (stagePointers.current.size >= 2 && pinchGesture.current) {
+      event.preventDefault();
+      const points = Array.from(stagePointers.current.values()).slice(0, 2);
+      const distance = getPointDistance(points[0], points[1]);
+      const center = getPointCenter(points[0], points[1]);
+      const nextZoom = clampZoom(pinchGesture.current.zoom * (distance / Math.max(1, pinchGesture.current.distance)));
+      const centerDelta = { x: center.x - pinchGesture.current.center.x, y: center.y - pinchGesture.current.center.y };
+      setZoom(nextZoom);
+      setScenePan(clampScenePan({
+        x: pinchGesture.current.pan.x + centerDelta.x,
+        y: pinchGesture.current.pan.y + centerDelta.y
+      }, nextZoom));
+      return;
+    }
+
     const drag = stageDrag.current;
     if (!drag) return;
 
@@ -783,6 +831,8 @@ export function PetStage() {
   const finishStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     const drag = stageDrag.current;
     stageDrag.current = null;
+    stagePointers.current.delete(event.pointerId);
+    if (stagePointers.current.size < 2) pinchGesture.current = null;
     if (!drag) return;
 
     const deltaX = event.clientX - drag.startX;
@@ -814,9 +864,27 @@ export function PetStage() {
     focusPet(pet);
   };
 
+  const switchSelectedPet = () => {
+    const currentIndex = Math.max(0, pets.findIndex((pet) => pet.id === selectedPetId));
+    const nextPet = pets[(currentIndex + 1) % pets.length];
+    if (!nextPet) return;
+
+    clearTimers();
+    setSelectedPetId(nextPet.id);
+    setBackgroundId(nextPet.roomId);
+    setFocusedPet(false);
+    setActiveInventoryCategory(null);
+    setSettingsOpen(false);
+    setMenuOpen(false);
+    setCameraFollowsPet(true);
+    setZoom(1);
+    requestAnimationFrame(() => setScenePan(getFocusPan(nextPet.position, 1)));
+  };
+
   const toggleCameraFollow = () => {
     setFocusedPet(false);
     setActiveInventoryCategory(null);
+    setMenuOpen(false);
     setCameraFollowsPet((current) => {
       const next = !current;
       if (next) {
@@ -831,10 +899,10 @@ export function PetStage() {
     setPets((currentPets) => {
       const existing = currentPets.find((pet) => pet.id === slotId);
       if (existing) {
-        return currentPets.map((pet) => pet.id === slotId ? { ...pet, assetKey } : pet);
+        return currentPets.map((pet) => pet.id === slotId ? { ...pet, assetKey, updatedAt: Date.now() } : pet);
       }
 
-      return [...currentPets, { ...createDefaultPet(slotId, assetKey, slotId === "pet1" ? "Momo" : "Pet 2"), roomId: backgroundId }].sort((a, b) => a.id.localeCompare(b.id));
+      return [...currentPets, { ...createDefaultPet(slotId, assetKey, slotId === "pet1" ? "Momo" : "Pet 2"), roomId: backgroundId, updatedAt: Date.now() }].sort((a, b) => a.id.localeCompare(b.id));
     });
     setSelectedPetId(slotId);
     setFocusedPet(false);
@@ -1588,6 +1656,11 @@ export function PetStage() {
           <section className={`statusPanel${focusedPet ? " dimmed" : ""}`} aria-label="Pet status">
             <div className="petName">
               <strong>{petName}</strong>
+              {canSwitchPet ? (
+                <button className="petSwitchButton" onClick={switchSelectedPet} title="Switch pet" type="button" aria-label="Switch pet">
+                  ›
+                </button>
+              ) : null}
             </div>
             <div className="statList">
               <StatBar className="hunger" icon={HUNGER_ICON} label="Hunger" value={stats.hunger} />
@@ -1692,7 +1765,7 @@ export function PetStage() {
           ) : null}
         </div>
 
-        {settingsOpen ? (
+        {settingsOpen && !focusedPet ? (
           <section className="settingsPanel" aria-label="Pet settings">
             {(["pet1", "pet2"] as SharedPet["id"][]).map((slotId) => {
               const slotPet = pets.find((pet) => pet.id === slotId);
@@ -1721,37 +1794,54 @@ export function PetStage() {
           </section>
         ) : null}
 
-        <div className="controls" aria-label="Controls">
-          <div className="controlGroup alignRight">
+        {!focusedPet ? (
+          <div className="controls" aria-label="Controls">
             <button
-              aria-label="Settings"
-              aria-pressed={settingsOpen}
-              className={`iconControlButton${settingsOpen ? " active" : ""}`}
-              onClick={() => setSettingsOpen((current) => !current)}
-              title="Settings"
+              aria-label="Open controls"
+              aria-expanded={menuOpen}
+              className={`menuToggleButton${menuOpen ? " active" : ""}`}
+              onClick={() => setMenuOpen((current) => !current)}
+              title="Controls"
               type="button"
             >
-              <NextImage alt="" draggable={false} fill sizes="36px" src={SETTINGS_ICON} />
+              {"///"}
             </button>
-            <button
-              aria-label="Follow pet camera"
-              aria-pressed={cameraFollowsPet}
-              className={`iconControlButton cameraFollowButton${cameraFollowsPet ? " active" : ""}`}
-              onClick={toggleCameraFollow}
-              title="Follow pet camera"
-              type="button"
-            >
-              <NextImage alt="" draggable={false} fill sizes="36px" src={CAM_ICON} />
-            </button>
-            <select className="select" disabled={isDead} onChange={(event) => changeBackground(event.target.value)} value={backgroundId}>
-              {BACKGROUNDS.map((background) => (
-                <option key={background.id} value={background.id}>
-                  {background.label}
-                </option>
-              ))}
-            </select>
+            {menuOpen ? (
+              <div className="controlMenu" aria-label="Control menu">
+                <button
+                  aria-label="Settings"
+                  aria-pressed={settingsOpen}
+                  className={`iconControlButton${settingsOpen ? " active" : ""}`}
+                  onClick={() => {
+                    setSettingsOpen((current) => !current);
+                    setMenuOpen(false);
+                  }}
+                  title="Settings"
+                  type="button"
+                >
+                  <NextImage alt="" draggable={false} fill sizes="36px" src={SETTINGS_ICON} />
+                </button>
+                <button
+                  aria-label="Follow pet camera"
+                  aria-pressed={cameraFollowsPet}
+                  className={`iconControlButton cameraFollowButton${cameraFollowsPet ? " active" : ""}`}
+                  onClick={toggleCameraFollow}
+                  title="Follow pet camera"
+                  type="button"
+                >
+                  <NextImage alt="" draggable={false} fill sizes="36px" src={CAM_ICON} />
+                </button>
+                <select className="select" disabled={isDead} onChange={(event) => changeBackground(event.target.value)} value={backgroundId}>
+                  {BACKGROUNDS.map((background) => (
+                    <option key={background.id} value={background.id}>
+                      {background.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
-        </div>
+        ) : null}
 
       </section>
     </main>
@@ -1761,6 +1851,7 @@ export function PetStage() {
 function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, now = Date.now()): SharedPet {
   return {
     id,
+    updatedAt: now,
     assetKey,
     name,
     stats: { ...initialStats },
@@ -1789,6 +1880,7 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
     return remoteState.pets.slice(0, 2).map((pet, index) => ({
       ...createDefaultPet(index === 0 ? "pet1" : "pet2", index === 0 ? DEFAULT_PET_VARIANT : SECOND_PET_VARIANT, index === 0 ? "Momo" : "Pet 2"),
       ...pet,
+      updatedAt: pet.updatedAt ?? Date.now(),
       stats: { ...initialStats, ...pet.stats },
       lifecycle: { ...initialLifecycle, ...pet.lifecycle },
       roomId: pet.roomId ?? remoteState.backgroundId,
@@ -1803,6 +1895,7 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
   return [{
     ...createDefaultPet("pet1", DEFAULT_PET_VARIANT, remoteState.petName),
     name: remoteState.petName,
+    updatedAt: remoteState.updatedAt,
     stats: { ...initialStats, ...remoteState.stats },
     lifecycle: { ...initialLifecycle, ...remoteState.lifecycle },
     roomId: remoteState.backgroundId,
@@ -1836,7 +1929,7 @@ function clampStat(value: number) {
 }
 
 function clampZoom(value: number) {
-  return Math.round(Math.max(1, Math.min(4, value)) * 100) / 100;
+  return Math.round(Math.max(0.82, Math.min(4, value)) * 100) / 100;
 }
 
 function clampPosition(value: number, min: number, max: number) {
@@ -1846,6 +1939,17 @@ function clampPosition(value: number, min: number, max: number) {
 function getWalkDuration(from: Point, to: Point, speed = 8) {
   const distance = Math.hypot(to.x - from.x, to.y - from.y);
   return Math.max(420, Math.round((distance / speed) * 1000));
+}
+
+function getPointDistance(first: Point, second: Point) {
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
+
+function getPointCenter(first: Point, second: Point) {
+  return {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2
+  };
 }
 
 function isKitchenRoom(roomId: string) {
