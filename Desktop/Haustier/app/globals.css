@@ -17,6 +17,7 @@
 html,
 body {
   min-height: 100%;
+  min-height: 100dvh;
   overscroll-behavior: none;
   background: #000;
 }
@@ -37,6 +38,7 @@ input {
 
 .appShell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #000;
   overflow: hidden;
 }
@@ -45,6 +47,7 @@ input {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: #000;
   overflow: hidden;
 }
@@ -53,7 +56,9 @@ input {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   border: 0;
   border-radius: 0;
@@ -62,6 +67,13 @@ input {
   isolation: isolate;
   caret-color: transparent;
   touch-action: none;
+}
+
+@media (max-width: 760px) {
+  .sceneWorld {
+    width: calc(100dvh * var(--world-aspect, 1.777));
+    height: 100dvh;
+  }
 }
 
 .stage::after {

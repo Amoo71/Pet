@@ -14,7 +14,7 @@ let redisClientPromise: Promise<RedisClientType> | null = null;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DECAY_STEP_MS = 4 * 60 * 60 * 1000;
 const DECAY_PER_STEP = 1;
-const AUTO_STEP_MS = 22_000;
+const AUTO_STEP_MS = 30_000;
 const AUTO_ROOM_CHANGE_CHANCE = 0.18;
 const ROOM_EXIT_LEFT_X = 7;
 const ROOM_EXIT_RIGHT_X = 93;
@@ -29,13 +29,15 @@ export async function GET() {
 export async function PUT(request: Request) {
   const incoming = (await request.json()) as Partial<SharedGameState>;
   const current = await readState();
+  const pets = mergePets(current.pets, incoming.pets);
   const mergedState: SharedGameState = {
     ...current,
     ...incoming,
     stats: { ...current.stats, ...incoming.stats },
     lifecycle: { ...current.lifecycle, ...incoming.lifecycle },
     pet: { ...current.pet, ...incoming.pet },
-    pets: mergePets(current.pets, incoming.pets),
+    pets,
+    backgroundId: pets[0]?.roomId ?? current.backgroundId,
     ball: { ...current.ball, ...incoming.ball },
     food: { ...current.food, ...incoming.food },
     bed: { ...current.bed, ...incoming.bed },
@@ -234,6 +236,7 @@ function getDefaultPet(id: SharedPet["id"], assetKey: string, name: string, now:
     position: { x: id === "pet1" ? 50 : 58, y: 78 },
     facing: 1,
     walkDurationMs: 0,
+    lastInteractionAt: now,
     lastAutoAt: now,
     pendingRoomId: "",
     pendingRoomDirection: 0,
@@ -251,6 +254,7 @@ function normalizePets(state: Partial<SharedGameState>, now: number) {
       lifecycle: { ...getDefaultLifecycle(now), ...pet.lifecycle },
       roomId: pet.roomId ?? state.backgroundId ?? DEFAULT_SHARED_GAME_STATE.backgroundId,
       position: { x: pet.position?.x ?? (index === 0 ? 50 : 58), y: pet.position?.y ?? 78 },
+      lastInteractionAt: pet.lastInteractionAt ?? pet.updatedAt ?? now,
       lastAutoAt: pet.lastAutoAt ?? now,
       pendingRoomId: pet.pendingRoomId ?? "",
       pendingRoomDirection: pet.pendingRoomDirection ?? 0,
@@ -268,6 +272,7 @@ function normalizePets(state: Partial<SharedGameState>, now: number) {
     position: { ...DEFAULT_SHARED_GAME_STATE.pet.position, ...state.pet?.position },
     facing: state.pet?.facing ?? DEFAULT_SHARED_GAME_STATE.pet.facing,
     walkDurationMs: state.pet?.walkDurationMs ?? DEFAULT_SHARED_GAME_STATE.pet.walkDurationMs,
+    lastInteractionAt: state.updatedAt ?? now,
     lastAutoAt: now,
     pendingRoomId: "",
     pendingRoomDirection: 0,
@@ -295,12 +300,14 @@ function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
 }
 
 function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
-  const nextPets = state.pets.map((pet) => applyPetLifecycle(applyPetAutonomy(normalizePetMotion(pet, now), now), now));
+  const sleepCompleted = state.bed.sleepEndsAt > 0 && state.bed.sleepEndsAt <= now;
+  const nextPets = state.pets.map((pet) => applyPetLifecycle(applyPetAutonomy(normalizePetMotion(completeSleep(pet, sleepCompleted, now), now), now), now));
   const petsChanged = nextPets.some((pet, index) => pet !== state.pets[index]);
   const primaryPet = nextPets[0];
-  const baseState = petsChanged && primaryPet ? {
+  const baseState = (petsChanged || sleepCompleted) && primaryPet ? {
     ...state,
     pets: nextPets,
+    backgroundId: primaryPet.roomId,
     petName: primaryPet.name,
     stats: primaryPet.stats,
     lifecycle: primaryPet.lifecycle,
@@ -309,7 +316,8 @@ function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
       position: primaryPet.position,
       facing: primaryPet.facing,
       walkDurationMs: primaryPet.walkDurationMs
-    }
+    },
+    bed: sleepCompleted ? { ...state.bed, visible: false, sleepEndsAt: 0, sleepOwnerId: "server" } : state.bed
   } : state;
 
   if (baseState.lifecycle.deadAt > 0) return baseState;
@@ -327,7 +335,7 @@ function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
   const statDeath = decayedStats.hunger <= 0 || decayedStats.energy <= 0 || decayedStats.mood <= 0;
 
   if (!missedCare && !statDeath && decaySteps <= 0) {
-    return petsChanged ? {
+    return petsChanged || sleepCompleted ? {
       ...baseState,
       version: baseState.version + 1,
       updatedAt: now,
@@ -350,6 +358,28 @@ function applyLifecycle(state: SharedGameState, now: number): SharedGameState {
     ball: statDeath || missedCare ? { ...baseState.ball, visible: false } : baseState.ball,
     food: statDeath || missedCare ? { ...baseState.food, visible: false } : baseState.food,
     bed: statDeath || missedCare ? { ...baseState.bed, visible: false, sleepEndsAt: 0, sleepOwnerId: "server" } : baseState.bed
+  };
+}
+
+function completeSleep(pet: SharedPet, sleepCompleted: boolean, now: number): SharedPet {
+  if (!sleepCompleted || pet.state !== "sleep" || pet.lifecycle.deadAt > 0) return pet;
+
+  return {
+    ...pet,
+    updatedAt: now,
+    lastInteractionAt: now,
+    state: "sitzen",
+    walkDurationMs: 0,
+    stats: {
+      hunger: clampStat(pet.stats.hunger - 2),
+      energy: 100,
+      mood: clampStat(pet.stats.mood + 8)
+    },
+    lifecycle: {
+      ...pet.lifecycle,
+      lastSleptAt: now,
+      lastDecayAt: now
+    }
   };
 }
 
@@ -379,6 +409,7 @@ function normalizePetMotion(pet: SharedPet, now: number): SharedPet {
 
 function applyPetAutonomy(pet: SharedPet, now: number): SharedPet {
   if (pet.lifecycle.deadAt > 0 || pet.state === "sleep") return pet;
+  if (now - (pet.lastInteractionAt ?? pet.updatedAt) < AUTO_STEP_MS) return pet;
   if (pet.pendingRoomId && pet.autoExitAt > 0) {
     if (now < pet.autoExitAt) return pet;
     return {

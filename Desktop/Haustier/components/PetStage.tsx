@@ -5,7 +5,7 @@ import type { CSSProperties, MouseEvent, PointerEvent, WheelEvent } from "react"
 import NextImage from "next/image";
 import { AnimatedSprite } from "@/components/AnimatedSprite";
 import { BACKGROUNDS, PET_STATES, PET_VARIANTS, type PetStateId } from "@/lib/gameConfig";
-import type { PetLifecycle, SharedGameState, SharedNote, SharedPet } from "@/lib/sharedGameState";
+import type { SharedGameState, SharedNote, SharedPet } from "@/lib/sharedGameState";
 
 type PetStats = {
   hunger: number;
@@ -164,7 +164,6 @@ export function PetStage() {
   const bedVelocity = useRef<Point>({ x: 0, y: 0 });
   const ballThrownByPlayer = useRef(false);
   const ballDespawnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sleepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchJumpEnabled = useRef(false);
   const lastBallDrag = useRef<{ point: Point; time: number } | null>(null);
   const stageDrag = useRef<{ startX: number; startY: number; startPan: Point } | null>(null);
@@ -174,6 +173,7 @@ export function PetStage() {
   const clientId = useRef("client-pending");
   const latestVersion = useRef(0);
   const applyingRemote = useRef(false);
+  const syncReady = useRef(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextClick = useRef(false);
@@ -194,13 +194,6 @@ export function PetStage() {
       stats: typeof updater === "function" ? updater(pet.stats) : updater
     }));
   };
-  const setLifecycle = (updater: PetLifecycle | ((current: PetLifecycle) => PetLifecycle)) => {
-    updateSelectedPet((pet) => ({
-      ...pet,
-      lifecycle: typeof updater === "function" ? updater(pet.lifecycle) : updater
-    }));
-  };
-
   const changePetNameDraft = (name: string) => {
     setPetNameDraft(name);
     if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
@@ -285,13 +278,21 @@ export function PetStage() {
 
   function markCare(kind: "fed" | "played" | "slept") {
     const now = Date.now();
-    setLifecycle((current) => ({
-      ...current,
-      lastFedAt: kind === "fed" ? now : current.lastFedAt,
-      lastPlayedAt: kind === "played" ? now : current.lastPlayedAt,
-      lastSleptAt: kind === "slept" ? now : current.lastSleptAt,
-      lastDecayAt: now
+    updateSelectedPet((pet) => ({
+      ...pet,
+      lastInteractionAt: now,
+      lifecycle: {
+        ...pet.lifecycle,
+        lastFedAt: kind === "fed" ? now : pet.lifecycle.lastFedAt,
+        lastPlayedAt: kind === "played" ? now : pet.lifecycle.lastPlayedAt,
+        lastSleptAt: kind === "slept" ? now : pet.lifecycle.lastSleptAt,
+        lastDecayAt: now
+      }
     }));
+  }
+
+  function markInteraction() {
+    updateSelectedPet((pet) => ({ ...pet, lastInteractionAt: Date.now() }));
   }
 
   function buildSharedState(): SharedGameState {
@@ -301,7 +302,7 @@ export function PetStage() {
       updatedBy: clientId.current,
       petName,
       stats,
-      backgroundId,
+      backgroundId: pets[0]?.roomId ?? backgroundId,
       lifecycle,
       pet: {
         state: petState,
@@ -337,13 +338,13 @@ export function PetStage() {
     };
   }
 
-  function applyRemoteState(remoteState: SharedGameState) {
+  function applyRemoteState(remoteState: SharedGameState, syncView = false) {
     applyingRemote.current = true;
     latestVersion.current = remoteState.version;
     const remotePets = normalizeRemotePets(remoteState);
     setPets(remotePets);
     setSelectedPetId((current) => remotePets.some((pet) => pet.id === current) ? current : remotePets[0]?.id ?? "pet1");
-    setBackgroundId(remoteState.backgroundId);
+    if (syncView) setBackgroundId(remotePets[0]?.roomId ?? remoteState.backgroundId);
     setBallVisible(remoteState.ball.visible);
     setBallRoomId(remoteState.ball.roomId);
     setBallImageSrc(remoteState.ball.image ?? BALL_IMAGE);
@@ -393,7 +394,7 @@ export function PetStage() {
       if (!response.ok) return;
 
       const savedState = (await response.json()) as SharedGameState;
-      applyRemoteState(savedState);
+      applyRemoteState(savedState, true);
     } catch {
       // Keep local restart visible if the server is temporarily unavailable.
     }
@@ -460,7 +461,6 @@ export function PetStage() {
     return () => {
       clearTimers();
       if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
-      if (sleepTimer.current) clearTimeout(sleepTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
       if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
     };
@@ -480,11 +480,12 @@ export function PetStage() {
         if (!response.ok) return;
 
         const remoteState = (await response.json()) as SharedGameState;
-        if (cancelled || remoteState.updatedBy === clientId.current || remoteState.version <= latestVersion.current) return;
-
-        applyRemoteState(remoteState);
+        if (cancelled) return;
+        if (remoteState.updatedBy !== clientId.current && remoteState.version > latestVersion.current) applyRemoteState(remoteState);
       } catch {
         // Local dev can briefly lose the server during refreshes.
+      } finally {
+        syncReady.current = true;
       }
     };
 
@@ -538,6 +539,7 @@ export function PetStage() {
       applyingRemote.current = false;
       return;
     }
+    if (!syncReady.current) return;
 
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
@@ -548,7 +550,7 @@ export function PetStage() {
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pets, selectedPetId, backgroundId, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballRotation, ballTransitionMs, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes]);
+  }, [pets, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballRotation, ballTransitionMs, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes]);
 
   useEffect(() => {
     if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
@@ -578,15 +580,6 @@ export function PetStage() {
   }, [petState]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setPets((currentPets) => currentPets.map((pet) => normalizePetMotionForClient(pet, now)));
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
     ballPositionRef.current = ballPosition;
   }, [ballPosition]);
 
@@ -599,35 +592,8 @@ export function PetStage() {
   }, [bedPosition]);
 
   useEffect(() => {
-    if (sleepTimer.current) clearTimeout(sleepTimer.current);
-    if (sleepEndsAt <= 0) return;
-    if (isDead) return;
-    if (sleepOwnerId !== clientId.current) return;
-
-    const remainingMs = Math.max(0, sleepEndsAt - Date.now());
-    sleepTimer.current = setTimeout(() => {
-      setBedVisible(false);
-      setSleepEndsAt(0);
-      setSleepOwnerId("server");
-      setPetState("sitzen");
-      setStats((current) => ({
-        hunger: clampStat(current.hunger - 2),
-        energy: 100,
-        mood: clampStat(current.mood + 8)
-      }));
-      markCare("slept");
-    }, remainingMs);
-
-    return () => {
-      if (sleepTimer.current) clearTimeout(sleepTimer.current);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDead, sleepEndsAt, sleepOwnerId]);
-
-  useEffect(() => {
     if (!isDead) return;
     clearTimers();
-    if (sleepTimer.current) clearTimeout(sleepTimer.current);
     const animationFrame = requestAnimationFrame(() => {
       setFocusedPet(false);
       setActiveInventoryCategory(null);
@@ -716,6 +682,7 @@ export function PetStage() {
 
   const walkTo = (target: Point) => {
     if (selectedPet.roomId !== backgroundId) return;
+    markInteraction();
     clearTimers();
     setFocusedPet(false);
     setFacing(target.x < petPosition.x ? -1 : 1);
@@ -805,6 +772,7 @@ export function PetStage() {
 
   const jump = () => {
     if (selectedPet.roomId !== backgroundId) return;
+    markInteraction();
     clearTimers();
     setFocusedPet(false);
 
@@ -822,7 +790,6 @@ export function PetStage() {
     setActiveInventoryCategory(null);
     setScenePan({ x: 0, y: 0 });
     setBackgroundId(nextBackgroundId);
-    setPetRoomId(nextBackgroundId);
     setSettingsOpen(false);
   };
 
@@ -901,8 +868,6 @@ export function PetStage() {
     clearTimers();
     setActiveInventoryCategory(null);
     viewBeforeFocus.current = { zoom, pan: scenePan };
-    setWalkDurationMs(0);
-    setPetState("sitzen");
     setFocusedPet(true);
     setZoom(FOCUS_ZOOM);
     setScenePan(getFocusPan(targetPet.position, FOCUS_ZOOM, true));
@@ -1033,7 +998,7 @@ export function PetStage() {
     setSleepOwnerId("server");
     setPetState("sitzen");
     setSelectedPetId("pet1");
-    applyRemoteState(nextState);
+    applyRemoteState(nextState, true);
     void pushFullState(nextState);
   };
 
@@ -1232,6 +1197,7 @@ export function PetStage() {
     exitItemTrayForDrag();
 
     if (item === "ball" || item === "ball2") {
+      markInteraction();
       const point = getBallPoint(event.clientX, event.clientY);
       // eslint-disable-next-line react-hooks/purity
       const now = Date.now();
@@ -1252,6 +1218,7 @@ export function PetStage() {
     }
 
     if (item === "steak" || item === "bone" || item === "napf" || item === "snacks") {
+      markInteraction();
       const point = getGroundItemPoint(event.clientX, event.clientY);
       setFoodVisible(true);
       setFoodRoomId(backgroundId);
@@ -1275,6 +1242,7 @@ export function PetStage() {
       return;
     }
 
+    markInteraction();
     const point = getGroundItemPoint(event.clientX, event.clientY);
     setBedVisible(true);
     setBedRoomId(backgroundId);
@@ -1319,6 +1287,7 @@ export function PetStage() {
 
   const startBallDrag = (event: PointerEvent<HTMLDivElement>) => {
     event.stopPropagation();
+    markInteraction();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = getBallPoint(event.clientX, event.clientY);
     // eslint-disable-next-line react-hooks/purity
@@ -1907,6 +1876,7 @@ function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, n
     position: { x: id === "pet1" ? 50 : 58, y: 78 },
     facing: 1,
     walkDurationMs: 0,
+    lastInteractionAt: now,
     lastAutoAt: now,
     pendingRoomId: "",
     pendingRoomDirection: 0,
@@ -1917,7 +1887,7 @@ function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, n
 function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
   const now = Date.now();
   if (remoteState.pets?.length) {
-    return remoteState.pets.slice(0, 2).map((pet, index) => normalizePetMotionForClient({
+    return remoteState.pets.slice(0, 2).map((pet, index) => ({
       ...createDefaultPet(index === 0 ? "pet1" : "pet2", index === 0 ? DEFAULT_PET_VARIANT : SECOND_PET_VARIANT, index === 0 ? "Momo" : "Pet 2"),
       ...pet,
       updatedAt: pet.updatedAt ?? now,
@@ -1925,14 +1895,15 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
       lifecycle: { ...initialLifecycle, ...pet.lifecycle },
       roomId: pet.roomId ?? remoteState.backgroundId,
       position: { x: pet.position?.x ?? (index === 0 ? 50 : 58), y: pet.position?.y ?? 78 },
+      lastInteractionAt: pet.lastInteractionAt ?? now,
       lastAutoAt: pet.lastAutoAt ?? now,
       pendingRoomId: pet.pendingRoomId ?? "",
       pendingRoomDirection: pet.pendingRoomDirection ?? 0,
       autoExitAt: pet.autoExitAt ?? 0
-    }, now));
+    }));
   }
 
-  return [normalizePetMotionForClient({
+  return [{
     ...createDefaultPet("pet1", DEFAULT_PET_VARIANT, remoteState.petName),
     name: remoteState.petName,
     updatedAt: remoteState.updatedAt,
@@ -1943,22 +1914,12 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
     position: remoteState.pet.position,
     facing: remoteState.pet.facing,
     walkDurationMs: remoteState.pet.walkDurationMs,
+    lastInteractionAt: remoteState.updatedAt,
     lastAutoAt: Date.now(),
     pendingRoomId: "",
     pendingRoomDirection: 0,
     autoExitAt: 0
-  }, now)];
-}
-
-function normalizePetMotionForClient(pet: SharedPet, now: number) {
-  if (pet.lifecycle.deadAt > 0 || pet.state === "sleep" || pet.pendingRoomId) return pet;
-  if (pet.state === "laufen" && pet.walkDurationMs > 0 && now - pet.updatedAt >= pet.walkDurationMs + 250) {
-    return { ...pet, updatedAt: now, state: "stehen" as const, walkDurationMs: 0 };
-  }
-  if (pet.state === "stehen" && now - pet.updatedAt >= 3000) {
-    return { ...pet, updatedAt: now, state: "sitzen" as const, walkDurationMs: 0 };
-  }
-  return pet;
+  }];
 }
 
 function preloadImage(src: string) {
@@ -2085,7 +2046,10 @@ function getSceneWorldMetrics(viewportWidth: number, viewportHeight: number) {
     return { width: viewportWidth, height: viewportHeight, left: 0, top: 0 };
   }
 
-  const worldScale = Math.max(viewportWidth / BACKGROUND_WIDTH, viewportHeight / BACKGROUND_HEIGHT, 1);
+  const fitsHeightViewport = viewportWidth <= 760;
+  const worldScale = fitsHeightViewport
+    ? viewportHeight / BACKGROUND_HEIGHT
+    : Math.max(viewportWidth / BACKGROUND_WIDTH, viewportHeight / BACKGROUND_HEIGHT, 1);
   const worldWidth = BACKGROUND_WIDTH * worldScale;
   const worldHeight = BACKGROUND_HEIGHT * worldScale;
 

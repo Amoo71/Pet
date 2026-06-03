@@ -32,6 +32,7 @@ export type SharedPet = {
   position: Point;
   facing: number;
   walkDurationMs: number;
+  lastInteractionAt: number;
   lastAutoAt: number;
   pendingRoomId: string;
   pendingRoomDirection: number;
@@ -138,6 +139,7 @@ export const DEFAULT_SHARED_GAME_STATE: SharedGameState = {
       position: { x: 50, y: 78 },
       facing: 1,
       walkDurationMs: 0,
+      lastInteractionAt: Date.now(),
       lastAutoAt: Date.now(),
       pendingRoomId: "",
       pendingRoomDirection: 0,
