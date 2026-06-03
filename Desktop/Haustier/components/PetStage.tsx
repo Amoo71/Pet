@@ -86,7 +86,6 @@ const LOCAL_INTERACTION_PROTECT_MS = 1400;
 const NAME_SAVE_DEBOUNCE_MS = 2000;
 const SETTINGS_CLICK_COUNT = 5;
 const SETTINGS_CLICK_WINDOW_MS = 1_500;
-const CAMERA_CLICK_COMMIT_MS = 420;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
 const SLEEP_DURATION_MS = 10_000;
@@ -186,7 +185,6 @@ export function PetStage() {
   const localInteractionProtectUntil = useRef(0);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cameraClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraClickCount = useRef(0);
   const firstCameraClickAt = useRef(0);
   const suppressNextClick = useRef(false);
@@ -495,7 +493,6 @@ export function PetStage() {
       if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
       if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
-      if (cameraClickTimer.current) clearTimeout(cameraClickTimer.current);
     };
   }, []);
 
@@ -997,7 +994,6 @@ export function PetStage() {
     }
 
     cameraClickCount.current += 1;
-    if (cameraClickTimer.current) clearTimeout(cameraClickTimer.current);
 
     if (cameraClickCount.current >= SETTINGS_CLICK_COUNT) {
       cameraClickCount.current = 0;
@@ -1006,12 +1002,7 @@ export function PetStage() {
       return;
     }
 
-    cameraClickTimer.current = setTimeout(() => {
-      cameraClickCount.current = 0;
-      firstCameraClickAt.current = 0;
-      cameraClickTimer.current = null;
-      toggleCameraFollow();
-    }, CAMERA_CLICK_COMMIT_MS);
+    toggleCameraFollow();
   };
 
   const togglePetSlot = (slotId: SharedPet["id"], assetKey: string) => {
