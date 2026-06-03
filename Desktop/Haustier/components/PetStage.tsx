@@ -81,6 +81,7 @@ const BALL_GRAVITY = 95;
 const ITEM_GRAVITY = 110;
 const SYNC_INTERVAL_MS = 250;
 const SYNC_DEBOUNCE_MS = 90;
+const NAME_SAVE_DEBOUNCE_MS = 2000;
 const FETCH_JUMP_CHANCE = 0.25;
 const BALL_DESPAWN_MS = 30_000;
 const SLEEP_DURATION_MS = 10_000;
@@ -104,6 +105,7 @@ export function PetStage() {
   const [activeInventoryCategory, setActiveInventoryCategory] = useState<InventoryCategory | null>(null);
   const [selectedPetId, setSelectedPetId] = useState<SharedPet["id"]>("pet1");
   const [pets, setPets] = useState<SharedPet[]>([createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo")]);
+  const [petNameDraft, setPetNameDraft] = useState("Momo");
   const [ballVisible, setBallVisible] = useState(false);
   const [ballRoomId, setBallRoomId] = useState(BACKGROUNDS[0]?.id ?? "wiese");
   const [ballImageSrc, setBallImageSrc] = useState(BALL_IMAGE);
@@ -173,6 +175,7 @@ export function PetStage() {
   const latestVersion = useRef(0);
   const applyingRemote = useRef(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nameSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextClick = useRef(false);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
@@ -196,6 +199,21 @@ export function PetStage() {
       ...pet,
       lifecycle: typeof updater === "function" ? updater(pet.lifecycle) : updater
     }));
+  };
+
+  const changePetNameDraft = (name: string) => {
+    setPetNameDraft(name);
+    if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
+    nameSaveTimer.current = setTimeout(() => {
+      setPetName(name.trim() || "Pet");
+      nameSaveTimer.current = null;
+    }, NAME_SAVE_DEBOUNCE_MS);
+  };
+
+  const flushPetNameDraft = () => {
+    if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
+    nameSaveTimer.current = null;
+    setPetName(petNameDraft.trim() || "Pet");
   };
 
   const activeBackground = useMemo(
@@ -386,12 +404,29 @@ export function PetStage() {
 
     PET_VARIANTS.forEach((variant) => {
       Object.values(variant.states).forEach((state) => {
-        state.frames.forEach((frame) => {
-          const image = new Image();
-          image.src = frame;
-        });
+        state.frames.forEach(preloadImage);
       });
     });
+
+    BACKGROUNDS.forEach((background) => background.frames.forEach(preloadImage));
+    [
+      BALL_IMAGE,
+      BALL2_IMAGE,
+      FOOD_IMAGES.steak,
+      FOOD_IMAGES.bone,
+      FOOD_IMAGES.napf,
+      FOOD_IMAGES.snacks,
+      BED_IMAGE,
+      BED2_IMAGE,
+      NOTE_IMAGES.note1,
+      NOTE_IMAGES.note2,
+      HUNGER_ICON,
+      ENERGY_ICON,
+      MOOD_ICON,
+      CAM_ICON,
+      SETTINGS_ICON,
+      ...Object.values(CATEGORY_ICONS)
+    ].forEach(preloadImage);
 
     const ballImage = new Image();
     ballImage.onload = () => setBallImageReady(true);
@@ -427,8 +462,14 @@ export function PetStage() {
       if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
       if (sleepTimer.current) clearTimeout(sleepTimer.current);
       if (syncTimer.current) clearTimeout(syncTimer.current);
+      if (nameSaveTimer.current) clearTimeout(nameSaveTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (nameSaveTimer.current) return;
+    setPetNameDraft(petName);
+  }, [petName, selectedPetId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -535,6 +576,15 @@ export function PetStage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [petState]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setPets((currentPets) => currentPets.map((pet) => normalizePetMotionForClient(pet, now)));
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     ballPositionRef.current = ballPosition;
@@ -1691,7 +1741,7 @@ export function PetStage() {
                 <>
                   <label className="nameEditor">
                     <span>Name</span>
-                    <input maxLength={24} onChange={(event) => setPetName(event.target.value)} value={petName} />
+                    <input maxLength={24} onBlur={flushPetNameDraft} onChange={(event) => changePetNameDraft(event.target.value)} value={petNameDraft} />
                   </label>
                   <div className="bigStats">
                     <StatBar className="hunger" icon={HUNGER_ICON} label="Hunger" value={stats.hunger} />
@@ -1798,8 +1848,9 @@ export function PetStage() {
           </section>
         ) : null}
 
-        <div className="controls" aria-label="Controls">
-          <div className="controlMenu" aria-label="Control menu">
+        {!focusedPet ? (
+          <div className="controls" aria-label="Controls">
+            <div className="controlMenu" aria-label="Control menu">
                 <button
                   aria-label="Settings"
                   aria-pressed={settingsOpen}
@@ -1827,8 +1878,9 @@ export function PetStage() {
                     </option>
                   ))}
                 </select>
+            </div>
           </div>
-        </div>
+        ) : null}
 
       </section>
     </main>
@@ -1863,23 +1915,24 @@ function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, n
 }
 
 function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
+  const now = Date.now();
   if (remoteState.pets?.length) {
-    return remoteState.pets.slice(0, 2).map((pet, index) => ({
+    return remoteState.pets.slice(0, 2).map((pet, index) => normalizePetMotionForClient({
       ...createDefaultPet(index === 0 ? "pet1" : "pet2", index === 0 ? DEFAULT_PET_VARIANT : SECOND_PET_VARIANT, index === 0 ? "Momo" : "Pet 2"),
       ...pet,
-      updatedAt: pet.updatedAt ?? Date.now(),
+      updatedAt: pet.updatedAt ?? now,
       stats: { ...initialStats, ...pet.stats },
       lifecycle: { ...initialLifecycle, ...pet.lifecycle },
       roomId: pet.roomId ?? remoteState.backgroundId,
       position: { x: pet.position?.x ?? (index === 0 ? 50 : 58), y: pet.position?.y ?? 78 },
-      lastAutoAt: pet.lastAutoAt ?? Date.now(),
+      lastAutoAt: pet.lastAutoAt ?? now,
       pendingRoomId: pet.pendingRoomId ?? "",
       pendingRoomDirection: pet.pendingRoomDirection ?? 0,
       autoExitAt: pet.autoExitAt ?? 0
-    }));
+    }, now));
   }
 
-  return [{
+  return [normalizePetMotionForClient({
     ...createDefaultPet("pet1", DEFAULT_PET_VARIANT, remoteState.petName),
     name: remoteState.petName,
     updatedAt: remoteState.updatedAt,
@@ -1894,7 +1947,25 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
     pendingRoomId: "",
     pendingRoomDirection: 0,
     autoExitAt: 0
-  }];
+  }, now)];
+}
+
+function normalizePetMotionForClient(pet: SharedPet, now: number) {
+  if (pet.lifecycle.deadAt > 0 || pet.state === "sleep" || pet.pendingRoomId) return pet;
+  if (pet.state === "laufen" && pet.walkDurationMs > 0 && now - pet.updatedAt >= pet.walkDurationMs + 250) {
+    return { ...pet, updatedAt: now, state: "stehen" as const, walkDurationMs: 0 };
+  }
+  if (pet.state === "stehen" && now - pet.updatedAt >= 3000) {
+    return { ...pet, updatedAt: now, state: "sitzen" as const, walkDurationMs: 0 };
+  }
+  return pet;
+}
+
+function preloadImage(src: string) {
+  if (!src) return;
+  const image = new Image();
+  image.decoding = "async";
+  image.src = src;
 }
 
 function StatBar({ className, icon, label, value }: { className: string; icon: string; label: string; value: number }) {
