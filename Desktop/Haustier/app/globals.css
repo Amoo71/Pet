@@ -1429,3 +1429,30 @@ input {
     translate: 0 0;
   }
 }
+
+.petSprite.strokeTarget {
+  cursor: crosshair;
+}
+
+.floatingHeart {
+  position: fixed;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: floatHeart 0.9s ease-out forwards;
+  z-index: 9999;
+  font-size: 22px;
+  line-height: 28px;
+  text-align: center;
+}
+
+.floatingHeart::after {
+  content: "❤️";
+}
+
+@keyframes floatHeart {
+  0%   { opacity: 1; transform: translate(-50%, -50%) scale(0.5); }
+  35%  { opacity: 1; transform: translate(-50%, -70%) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -130%) scale(0.8); }
+}

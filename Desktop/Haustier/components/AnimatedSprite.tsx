@@ -12,6 +12,9 @@ type AnimatedSpriteProps = {
   label: string;
   renderMode?: "background" | "frames";
   onClick?: MouseEventHandler<HTMLDivElement>;
+  onPointerDown?: React.PointerEventHandler<HTMLDivElement>;
+  onPointerMove?: React.PointerEventHandler<HTMLDivElement>;
+  onPointerUp?: React.PointerEventHandler<HTMLDivElement>;
   style?: React.CSSProperties;
   children?: React.ReactNode;
 };
@@ -23,6 +26,9 @@ export function AnimatedSprite({
   label,
   renderMode = "frames",
   onClick,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
   style,
   children
 }: AnimatedSpriteProps) {
@@ -116,7 +122,7 @@ export function AnimatedSprite({
   }
 
   return (
-    <div aria-label={label} className={className} onClick={onClick} role="img" style={frameStyle}>
+    <div aria-label={label} className={className} onClick={onClick} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} role="img" style={frameStyle}>
       {visibleFrames.map((frame) => (
         <img
           alt=""

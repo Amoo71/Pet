@@ -95,6 +95,10 @@ const WHEEL_ZOOM_STEP = 0.025;
 const BED_WALK_INTO_OFFSET_Y = 10;
 const BED_SLEEP_OFFSET_Y = 3;
 const FOCUS_ZOOM = 1.45;
+const CLOSE_ZOOM = 2.6;
+const DOUBLE_CLICK_MS = 350;
+const STROKE_HEART_DISTANCE = 26;
+const STROKE_MOOD_COOLDOWN_MS = 700;
 const BACKGROUND_WIDTH = 1672;
 const BACKGROUND_HEIGHT = 941;
 const BACKGROUND_ASPECT_RATIO = BACKGROUND_WIDTH / BACKGROUND_HEIGHT;
@@ -150,6 +154,8 @@ export function PetStage() {
   const [viewingNoteId, setViewingNoteId] = useState<string | null>(null);
   const [sleepEndsAt, setSleepEndsAt] = useState(0);
   const [sleepOwnerId, setSleepOwnerId] = useState("server");
+  const [petZoomMode, setPetZoomMode] = useState<"normal" | "close">("normal");
+  const [hearts, setHearts] = useState<Array<{ id: string; x: number; y: number }>>([]);
   const selectedPet = pets.find((pet) => pet.id === selectedPetId) ?? pets[0] ?? createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo");
   const petName = selectedPet.name;
   const petState = selectedPet.state;
@@ -189,9 +195,29 @@ export function PetStage() {
   const cameraClickCount = useRef(0);
   const firstCameraClickAt = useRef(0);
   const suppressNextClick = useRef(false);
+  const walkOriginRef = useRef<Point>({ x: 50, y: 78 });
+  const walkStartTimeRef = useRef<number>(0);
+  const walkDurationAtStartRef = useRef<number>(0);
+  const suppressCameraFollowRef = useRef(false);
+  const lastPetClickRef = useRef<{ time: number; petId: string } | null>(null);
+  const strokeRef = useRef<{ lastX: number; lastY: number } | null>(null);
+  const strokeDistanceRef = useRef(0);
+  const strokeMoodCooldownRef = useRef(0);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
     setPets((currentPets) => currentPets.map((pet) => pet.id === selectedPetId ? { ...updater(pet), updatedAt: Date.now() } : pet));
+  };
+
+  const getVisualPetPosition = (): Point => {
+    const duration = walkDurationAtStartRef.current;
+    if (petState !== "laufen" || duration <= 0) return petPosition;
+    const elapsed = Date.now() - walkStartTimeRef.current;
+    const t = Math.min(1, elapsed / duration);
+    const origin = walkOriginRef.current;
+    return {
+      x: origin.x + (petPosition.x - origin.x) * t,
+      y: origin.y + (petPosition.y - origin.y) * t
+    };
   };
 
   const setPetName = (name: string) => updateSelectedPet((pet) => ({ ...pet, name }));
@@ -546,8 +572,10 @@ export function PetStage() {
 
   useEffect(() => {
     if (!cameraFollowsPet) return;
+    if (suppressCameraFollowRef.current) return;
     if (selectedPet.roomId !== backgroundId) {
       const animationFrame = requestAnimationFrame(() => {
+        if (suppressCameraFollowRef.current) return;
         setBackgroundId(selectedPet.roomId);
         setScenePan({ x: 0, y: 0 });
       });
@@ -555,6 +583,7 @@ export function PetStage() {
     }
 
     const animationFrame = requestAnimationFrame(() => {
+      if (suppressCameraFollowRef.current) return;
       setScenePan(getFocusPan(petPosition, zoom));
     });
     return () => cancelAnimationFrame(animationFrame);
@@ -676,10 +705,67 @@ export function PetStage() {
   };
 
   const exitFocus = () => {
+    setPetZoomMode("normal");
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setZoom(viewBeforeFocus.current.zoom);
     setScenePan(clampScenePan(viewBeforeFocus.current.pan, viewBeforeFocus.current.zoom));
+  };
+
+  const exitCloseZoom = () => {
+    setPetZoomMode("normal");
+    setZoom(viewBeforeFocus.current.zoom);
+    setScenePan(clampScenePan(viewBeforeFocus.current.pan, viewBeforeFocus.current.zoom));
+  };
+
+  const zoomCloseToPet = (targetPet = selectedPet) => {
+    clearTimers();
+    setActiveInventoryCategory(null);
+    setFocusedPet(false);
+    viewBeforeFocus.current = { zoom, pan: scenePan };
+    setPetZoomMode("close");
+    setZoom(CLOSE_ZOOM);
+    setScenePan(getFocusPan(targetPet.position, CLOSE_ZOOM, true));
+  };
+
+  const spawnHeart = (clientX: number, clientY: number) => {
+    // eslint-disable-next-line react-hooks/purity
+    const id = `h-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    setHearts((current) => [...current.slice(-6), { id, x: clientX, y: clientY }]);
+    setTimeout(() => setHearts((current) => current.filter((h) => h.id !== id)), 900);
+  };
+
+  const startPetStroke = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (petZoomMode !== "close") return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    strokeRef.current = { lastX: event.clientX, lastY: event.clientY };
+    strokeDistanceRef.current = 0;
+  };
+
+  const movePetStroke = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!strokeRef.current || petZoomMode !== "close") return;
+    event.stopPropagation();
+    const dx = event.clientX - strokeRef.current.lastX;
+    const dy = event.clientY - strokeRef.current.lastY;
+    strokeRef.current.lastX = event.clientX;
+    strokeRef.current.lastY = event.clientY;
+    strokeDistanceRef.current += Math.hypot(dx, dy);
+    if (strokeDistanceRef.current >= STROKE_HEART_DISTANCE) {
+      strokeDistanceRef.current = 0;
+      spawnHeart(event.clientX, event.clientY);
+      // eslint-disable-next-line react-hooks/purity
+      const now = Date.now();
+      if (now > strokeMoodCooldownRef.current) {
+        strokeMoodCooldownRef.current = now + STROKE_MOOD_COOLDOWN_MS;
+        changeStats({ mood: 2 });
+        markCare("played");
+      }
+    }
+  };
+
+  const endPetStroke = () => {
+    strokeRef.current = null;
   };
 
   const handleFocusBack = () => {
@@ -699,6 +785,10 @@ export function PetStage() {
     }
 
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote")) return;
+    if (petZoomMode === "close") {
+      exitCloseZoom();
+      return;
+    }
     if (focusedPet) {
       exitFocus();
       return;
@@ -730,15 +820,21 @@ export function PetStage() {
   const walkTo = (target: Point) => {
     if (selectedPet.roomId !== backgroundId) return;
     markInteraction();
+    const currentPos = getVisualPetPosition();
     clearTimers();
     setFocusedPet(false);
-    setFacing(target.x < petPosition.x ? -1 : 1);
-
+    setFacing(target.x < currentPos.x ? -1 : 1);
+    walkOriginRef.current = currentPos;
+    setPetPosition(currentPos);
     setPetState("stehen");
     setWalkDurationMs(0);
 
-    const duration = getWalkDuration(petPosition, target);
+    const duration = getWalkDuration(currentPos, target);
+    const delay = petState === "sitzen" ? 180 : 40;
     const timer = setTimeout(() => {
+      walkOriginRef.current = currentPos;
+      walkStartTimeRef.current = Date.now();
+      walkDurationAtStartRef.current = duration;
       setWalkDurationMs(duration);
       setPetState("laufen");
       setPetPosition(target);
@@ -757,7 +853,7 @@ export function PetStage() {
         }
       }, duration);
       actionTimers.current.push(standTimer);
-    }, petState === "sitzen" ? 180 : 40);
+    }, delay);
     actionTimers.current.push(timer);
   };
 
@@ -767,6 +863,7 @@ export function PetStage() {
     const nextBackground = BACKGROUNDS[nextIndex];
     if (!nextBackground || nextBackground.id === backgroundId) return;
 
+    localInteractionProtectUntil.current = Date.now() + 3500;
     clearTimers();
     setWalkTargetMarker(null);
     setFocusedPet(false);
@@ -836,6 +933,9 @@ export function PetStage() {
     if (isDead) return;
     if (nextBackgroundId === backgroundId) return;
 
+    suppressCameraFollowRef.current = true;
+    requestAnimationFrame(() => { suppressCameraFollowRef.current = false; });
+    setPetZoomMode("normal");
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setCameraFollowsPet(false);
@@ -936,9 +1036,25 @@ export function PetStage() {
       setSelectedPetId(pet.id);
       setFocusedPet(false);
       setActiveInventoryCategory(null);
+      setPetZoomMode("normal");
       return;
     }
 
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now();
+    const last = lastPetClickRef.current;
+    if (last && last.petId === pet.id && now - last.time < DOUBLE_CLICK_MS) {
+      lastPetClickRef.current = null;
+      if (petZoomMode === "close") {
+        exitCloseZoom();
+      } else {
+        zoomCloseToPet(pet);
+      }
+      return;
+    }
+    lastPetClickRef.current = { time: now, petId: pet.id };
+
+    if (petZoomMode === "close") return;
     focusPet(pet);
   };
 
@@ -953,6 +1069,7 @@ export function PetStage() {
     setBackgroundId(nextPet.roomId);
     setFocusedPet(false);
     setActiveInventoryCategory(null);
+    setPetZoomMode("normal");
     setSettingsOpen(false);
     setCameraFollowsPet(true);
     setZoom(1);
@@ -1654,6 +1771,14 @@ export function PetStage() {
 
   return (
     <main className="appShell">
+      {hearts.map((heart) => (
+        <div
+          aria-hidden="true"
+          className="floatingHeart"
+          key={heart.id}
+          style={{ left: `${heart.x}px`, top: `${heart.y}px` } as CSSProperties}
+        />
+      ))}
       <section className="gameCard" aria-label="Pet game">
         <div
           className="stage"
@@ -1680,14 +1805,18 @@ export function PetStage() {
                 "--pet-walk-duration": `${pet.walkDurationMs}ms`
               } as CSSProperties;
 
+              const isStrokeTarget = petZoomMode === "close" && pet.id === selectedPetId;
               return (
                 <AnimatedSprite
-                  className={`petSprite${pet.id === selectedPetId ? " selected" : ""}${pet.state === "springen" ? " jumping" : ""}${pet.state === "sleep" ? " sleeping" : ""}`}
+                  className={`petSprite${pet.id === selectedPetId ? " selected" : ""}${pet.state === "springen" ? " jumping" : ""}${pet.state === "sleep" ? " sleeping" : ""}${isStrokeTarget ? " strokeTarget" : ""}`}
                   frameMs={state.frameMs}
                   frames={frames}
                   key={pet.id}
                   label={`${pet.name} ${state.label}`}
                   onClick={isDead || pet.lifecycle.deadAt > 0 ? undefined : (event) => handlePetClick(pet, event)}
+                  onPointerDown={isStrokeTarget ? startPetStroke : undefined}
+                  onPointerMove={isStrokeTarget ? movePetStroke : undefined}
+                  onPointerUp={isStrokeTarget ? endPetStroke : undefined}
                   style={style}
                 />
               );
