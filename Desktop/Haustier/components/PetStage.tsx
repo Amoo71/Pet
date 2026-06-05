@@ -234,7 +234,13 @@ export function PetStage() {
   const setPetName = (name: string) => updateSelectedPet((pet) => ({ ...pet, name }));
   const setPetState = (state: PetStateId) => updateSelectedPet((pet) => ({ ...pet, state }));
   const setPetRoomId = (roomId: string) => updateSelectedPet((pet) => ({ ...pet, roomId }));
-  const setPetPosition = (position: Point) => updateSelectedPet((pet) => ({ ...pet, position }));
+  const setPetPosition = (position: Point) => updateSelectedPet((pet) => ({
+    ...pet,
+    position: {
+      x: Math.max(2, Math.min(98, position.x)),
+      y: Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, position.y))
+    }
+  }));
   const setFacing = (nextFacing: number) => updateSelectedPet((pet) => ({ ...pet, facing: nextFacing }));
   const setWalkDurationMs = (nextWalkDurationMs: number) => updateSelectedPet((pet) => ({ ...pet, walkDurationMs: nextWalkDurationMs }));
   const setStats = (updater: PetStats | ((current: PetStats) => PetStats)) => {
@@ -1997,9 +2003,11 @@ export function PetStage() {
               } else {
                 frames = allFrames;
               }
+              const safeX = Math.max(2, Math.min(98, pet.position.x));
+              const safeY = Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position.y));
               const style = {
-                "--pet-x": `${pet.position.x}%`,
-                "--pet-y": `${pet.position.y}%`,
+                "--pet-x": `${safeX}%`,
+                "--pet-y": `${safeY}%`,
                 "--pet-facing": pet.facing,
                 "--pet-walk-duration": `${pet.walkDurationMs}ms`
               } as CSSProperties;
@@ -2355,7 +2363,10 @@ function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
       stats: { ...initialStats, ...pet.stats },
       lifecycle: { ...initialLifecycle, ...pet.lifecycle },
       roomId: pet.roomId ?? remoteState.backgroundId,
-      position: { x: pet.position?.x ?? (index === 0 ? 50 : 58), y: pet.position?.y ?? 78 },
+      position: {
+        x: Math.max(2, Math.min(98, pet.position?.x ?? (index === 0 ? 50 : 58))),
+        y: Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position?.y ?? 78))
+      },
       lastInteractionAt: pet.lastInteractionAt ?? now,
       lastAutoAt: pet.lastAutoAt ?? now,
       pendingRoomId: pet.pendingRoomId ?? "",
