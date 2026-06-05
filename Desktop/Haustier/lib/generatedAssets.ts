@@ -158,40 +158,40 @@ export const GENERATED_PET_VARIANTS = {
   },
   "pet3": {
     "laufen": [
-      "/assets/pet3/laufen/frame-01.PNG",
-      "/assets/pet3/laufen/frame-02.PNG",
-      "/assets/pet3/laufen/frame-03.PNG",
-      "/assets/pet3/laufen/frame-04.PNG",
-      "/assets/pet3/laufen/frame-05.PNG",
-      "/assets/pet3/laufen/frame-06.PNG",
-      "/assets/pet3/laufen/frame-07.PNG"
+      "/assets/pet3/laufen/frame-01.png",
+      "/assets/pet3/laufen/frame-02.png",
+      "/assets/pet3/laufen/frame-03.png",
+      "/assets/pet3/laufen/frame-04.png",
+      "/assets/pet3/laufen/frame-05.png",
+      "/assets/pet3/laufen/frame-06.png",
+      "/assets/pet3/laufen/frame-07.png"
     ],
     "sitzen": [
-      "/assets/pet3/sitzen/frame-01.PNG",
-      "/assets/pet3/sitzen/frame-02.PNG",
-      "/assets/pet3/sitzen/frame-03.PNG",
-      "/assets/pet3/sitzen/frame-04.PNG"
+      "/assets/pet3/sitzen/frame-01.png",
+      "/assets/pet3/sitzen/frame-02.png",
+      "/assets/pet3/sitzen/frame-03.png",
+      "/assets/pet3/sitzen/frame-04.png"
     ],
     "sleep": [
-      "/assets/pet3/sleep/frame-01.PNG",
-      "/assets/pet3/sleep/frame-02.PNG",
-      "/assets/pet3/sleep/frame-03.PNG"
+      "/assets/pet3/sleep/frame-01.png",
+      "/assets/pet3/sleep/frame-02.png",
+      "/assets/pet3/sleep/frame-03.png"
     ],
     "springen": [
-      "/assets/pet3/springen/frame-01.PNG",
-      "/assets/pet3/springen/frame-02.PNG",
-      "/assets/pet3/springen/frame-03.PNG",
-      "/assets/pet3/springen/frame-04.PNG",
-      "/assets/pet3/springen/frame-05.PNG",
-      "/assets/pet3/springen/frame-06.PNG",
-      "/assets/pet3/springen/frame-07.PNG",
-      "/assets/pet3/springen/frame-08.PNG",
-      "/assets/pet3/springen/frame-09.PNG",
-      "/assets/pet3/springen/frame-10.PNG"
+      "/assets/pet3/springen/frame-01.png",
+      "/assets/pet3/springen/frame-02.png",
+      "/assets/pet3/springen/frame-03.png",
+      "/assets/pet3/springen/frame-04.png",
+      "/assets/pet3/springen/frame-05.png",
+      "/assets/pet3/springen/frame-06.png",
+      "/assets/pet3/springen/frame-07.png",
+      "/assets/pet3/springen/frame-08.png",
+      "/assets/pet3/springen/frame-09.png",
+      "/assets/pet3/springen/frame-10.png"
     ],
     "stehen": [
-      "/assets/pet3/stehen/frame-01.PNG",
-      "/assets/pet3/stehen/frame-02.PNG"
+      "/assets/pet3/stehen/frame-01.png",
+      "/assets/pet3/stehen/frame-02.png"
     ]
   }
 } as const;
