@@ -158,6 +158,7 @@ export function PetStage() {
   const [sleepEndsAt, setSleepEndsAt] = useState(0);
   const [sleepOwnerId, setSleepOwnerId] = useState("server");
   const [petZoomMode, setPetZoomMode] = useState<"normal" | "close">("normal");
+  const petZoomModeRef = useRef<"normal" | "close">("normal");
   const [hearts, setHearts] = useState<Array<{ id: string; x: number; y: number; dx: number; rot: number }>>([]);
   const [poops, setPoops] = useState<SharedPoop[]>([]);
   const selectedPet = pets.find((pet) => pet.id === selectedPetId) ?? pets[0] ?? createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo");
@@ -661,6 +662,7 @@ export function PetStage() {
 
   useEffect(() => { isDeadRef.current = isDead; }, [isDead]);
   useEffect(() => { selectedPetRoomRef.current = selectedPet.roomId; }, [selectedPet.roomId]);
+  useEffect(() => { petZoomModeRef.current = petZoomMode; }, [petZoomMode]);
 
   useEffect(() => {
     if (!isDead) return;
@@ -681,6 +683,7 @@ export function PetStage() {
     if (isDead || petState !== "sitzen") return;
     const delay = 10_000 + Math.random() * 18_000;
     const timer = setTimeout(() => {
+      if (petZoomModeRef.current === "close") return;
       if (Date.now() < localInteractionProtectUntil.current) return;
       const r = Math.random();
       if (r < 0.55) {
@@ -812,7 +815,7 @@ export function PetStage() {
 
     // Snap the pet to its visual position so it doesn't jump after we clear timers
     setPetPosition(visualPos);
-    setPetState("stehen");
+    setPetState("sitzen");
     setWalkDurationMs(0);
     setPetZoomMode("close");
     setZoom(CLOSE_ZOOM);
@@ -891,10 +894,7 @@ export function PetStage() {
     }
 
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote")) return;
-    if (petZoomMode === "close") {
-      exitCloseZoom();
-      return;
-    }
+    if (petZoomMode === "close") return;
     if (focusedPet) {
       exitFocus();
       return;
@@ -916,7 +916,7 @@ export function PetStage() {
     }
 
     const target = {
-      x: clampPosition(worldX, 7, 93),
+      x: clampPosition(worldX, 9, 91),
       y: clampPosition(worldY, MOVEMENT_AREA.minY, MOVEMENT_AREA.maxY)
     };
 
@@ -981,13 +981,6 @@ export function PetStage() {
         setWalkDurationMs(0);
         setPetState("stehen");
         changeStats({ energy: -1 });
-        if (target.x <= ROOM_EXIT_LEFT_X) {
-          enterAdjacentRoom(-1);
-          return;
-        }
-        if (target.x >= ROOM_EXIT_RIGHT_X) {
-          enterAdjacentRoom(1);
-        }
       }, duration);
       actionTimers.current.push(standTimer);
     }, delay);
@@ -1012,8 +1005,8 @@ export function PetStage() {
     setWalkDurationMs(0);
     setPetState("stehen");
 
-    const start = { x: direction > 0 ? -12 : 112, y: ROOM_EDGE_TARGET_Y };
-    const target = { x: direction > 0 ? 24 : 76, y: ROOM_EDGE_TARGET_Y };
+    const start = { x: direction > 0 ? 2 : 98, y: ROOM_EDGE_TARGET_Y };
+    const target = { x: direction > 0 ? 28 : 72, y: ROOM_EDGE_TARGET_Y };
     setPetPosition(start);
 
     const enterTimer = setTimeout(() => {
@@ -1080,9 +1073,9 @@ export function PetStage() {
       clearTimers();
       setWalkTargetMarker(null);
       localInteractionProtectUntil.current = Date.now() + 3200;
-      const entryStart: Point = { x: -8, y: 82 };
+      const entryStart: Point = { x: 2, y: 82 };
       const entryTarget: Point = { x: 36, y: 82 };
-      suppressCameraFollowRef.current = true; // hold camera at center while pet is off-screen
+      suppressCameraFollowRef.current = false;
       setPetRoomId(nextBackgroundId);
       setPetPosition(entryStart);
       setFacing(1);
@@ -1091,7 +1084,6 @@ export function PetStage() {
       setScenePan({ x: 0, y: 0 });
       setBackgroundId(nextBackgroundId);
       const enterTimer = setTimeout(() => {
-        suppressCameraFollowRef.current = false; // let camera follow when walk starts
         const duration = 1600;
         walkOriginRef.current = entryStart;
         walkStartTimeRef.current = Date.now();
@@ -1544,6 +1536,16 @@ export function PetStage() {
   const removePoopById = (id: string) => {
     setPoops((current) => current.filter((p) => p.id !== id));
     changeStats({ mood: 1 });
+  };
+
+  const goToFirstPoop = () => {
+    const first = poops[0];
+    if (!first) return;
+    setBackgroundId(first.roomId);
+    setFocusedPet(false);
+    setActiveInventoryCategory(null);
+    const pan = getFocusPan({ x: first.position.x, y: first.position.y }, zoom);
+    setScenePan(clampScenePan(pan, zoom));
   };
 
   const startNoteDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -2262,6 +2264,17 @@ export function PetStage() {
                 >
                   <NextImage alt="" draggable={false} fill sizes="36px" src={settingsOpen ? SETTINGS_ICON : CAM_ICON} />
                 </button>
+                {poops.length > 0 ? (
+                  <button
+                    aria-label={`${poops.length} poop pile${poops.length > 1 ? "s" : ""} – tap to go there`}
+                    className="poopIndicatorButton"
+                    onClick={goToFirstPoop}
+                    type="button"
+                  >
+                    <NextImage alt="" draggable={false} fill sizes="28px" src={POOP_IMAGE} />
+                    <span aria-hidden="true">!</span>
+                  </button>
+                ) : null}
                 <select className="select" disabled={isDead} onChange={(event) => changeBackground(event.target.value)} value={backgroundId}>
                   {BACKGROUNDS.map((background) => (
                     <option key={background.id} value={background.id}>

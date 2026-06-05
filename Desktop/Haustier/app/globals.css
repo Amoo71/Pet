@@ -1480,26 +1480,68 @@ input {
   transform: scale(0.88);
 }
 
+.poopIndicatorButton {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  animation: poopBounce 1.2s ease-in-out infinite;
+}
+
+.poopIndicatorButton span {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: #ff4444;
+  line-height: 1;
+  text-shadow: 0 0 4px rgba(0,0,0,0.6);
+  pointer-events: none;
+}
+
+.poopIndicatorButton:active {
+  transform: scale(0.9);
+}
+
+@keyframes poopBounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-4px); }
+}
+
 .focusPanelButtons {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   justify-content: center;
   margin-top: 4px;
 }
 
+.focusPanelButtons .closeFocus {
+  width: auto;
+  flex: 1;
+}
+
 .inspectButton {
-  padding: 8px 18px;
-  border-radius: 20px;
-  border: 1.5px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, transform 0.15s;
+  white-space: nowrap;
 }
 
 .inspectButton:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.14);
   transform: scale(1.04);
 }
 
