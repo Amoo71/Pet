@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, WheelEvent } from "react";
 import NextImage from "next/image";
 import { AnimatedSprite } from "@/components/AnimatedSprite";
@@ -96,6 +96,7 @@ const WHEEL_ZOOM_STEP = 0.025;
 const BED_WALK_INTO_OFFSET_Y = 10;
 const BED_SLEEP_OFFSET_Y = 3;
 const FOCUS_ZOOM = 1.45;
+const CAMERA_FOLLOW_ZOOM = 1.4;
 const CLOSE_ZOOM = 2.6;
 const DOUBLE_CLICK_MS = 350;
 const STROKE_HEART_DISTANCE = 26;
@@ -571,24 +572,15 @@ export function PetStage() {
     return () => window.removeEventListener("resize", handleResize);
   }, [cameraFollowsPet, petPosition, zoom]);
 
-  useEffect(() => {
+  // useLayoutEffect fires synchronously before browser paint so pan and pet walk
+  // transitions start in the exact same frame — no drift or 1-frame lag.
+  useLayoutEffect(() => {
     if (!cameraFollowsPet) return;
     if (suppressCameraFollowRef.current) return;
-    if (selectedPet.roomId !== backgroundId) {
-      const animationFrame = requestAnimationFrame(() => {
-        if (suppressCameraFollowRef.current) return;
-        setBackgroundId(selectedPet.roomId);
-        setScenePan({ x: 0, y: 0 });
-      });
-      return () => cancelAnimationFrame(animationFrame);
-    }
-
-    const animationFrame = requestAnimationFrame(() => {
-      if (suppressCameraFollowRef.current) return;
-      setScenePan(getFocusPan(petPosition, zoom));
-    });
-    return () => cancelAnimationFrame(animationFrame);
-  }, [backgroundId, cameraFollowsPet, petPosition, selectedPet.roomId, zoom]);
+    if (selectedPet.roomId !== backgroundId) return;
+    setScenePan(getFocusPan(petPosition, zoom));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backgroundId, cameraFollowsPet, petPosition, zoom]);
 
   useEffect(() => {
     if (!noteEditorOpen) return;
@@ -724,10 +716,22 @@ export function PetStage() {
     setActiveInventoryCategory(null);
     setFocusedPet(false);
     viewBeforeFocus.current = { zoom, pan: scenePan };
-    setPetZoomMode("close");
+
     const visualPos = targetPet.id === selectedPetId ? getVisualPetPosition() : targetPet.position;
+    // Sprite is bottom-anchored (translate: -50% -100%). Compute the visual center.
+    const stage = stageRef.current;
+    const world = stage ? getSceneWorldMetrics(stage.clientWidth, stage.clientHeight) : null;
+    const spriteHeight = stage ? Math.min(340, Math.max(180, 0.26 * stage.clientWidth)) : 240;
+    const spriteHeightPct = world ? (spriteHeight / world.height) * 100 : 12;
+    const focusPos = { x: visualPos.x, y: visualPos.y - spriteHeightPct * 0.5 };
+
+    // Snap the pet to its visual position so it doesn't jump after we clear timers
+    setPetPosition(visualPos);
+    setPetState("stehen");
+    setWalkDurationMs(0);
+    setPetZoomMode("close");
     setZoom(CLOSE_ZOOM);
-    setScenePan(getFocusPan(visualPos, CLOSE_ZOOM, true));
+    setScenePan(getFocusPan(focusPos, CLOSE_ZOOM, true));
   };
 
   const spawnHeart = (clientX: number, clientY: number) => {
@@ -755,7 +759,20 @@ export function PetStage() {
     strokeDistanceRef.current += Math.hypot(dx, dy);
     if (strokeDistanceRef.current >= STROKE_HEART_DISTANCE) {
       strokeDistanceRef.current = 0;
-      spawnHeart(event.clientX, event.clientY);
+
+      // Spawn heart above pet's head (not at pointer)
+      const rect = stageRef.current?.getBoundingClientRect();
+      if (rect) {
+        const world = getSceneWorldMetrics(rect.width, rect.height);
+        const spriteHeight = Math.min(340, Math.max(180, 0.26 * rect.width));
+        const headY_pct = petPosition.y - (spriteHeight / world.height) * 100;
+        const wx = (petPosition.x / 100) * world.width;
+        const wy = (headY_pct / 100) * world.height;
+        const hx = rect.left + rect.width / 2 + (wx - world.width / 2) * zoom + scenePan.x;
+        const hy = rect.top + rect.height / 2 + (wy - world.height / 2) * zoom + scenePan.y - 12;
+        spawnHeart(hx, hy);
+      }
+
       // eslint-disable-next-line react-hooks/purity
       const now = Date.now();
       if (now > strokeMoodCooldownRef.current) {
@@ -972,15 +989,36 @@ export function PetStage() {
     setSettingsOpen(false);
 
     if (cameraFollowsPet) {
-      // Pet follows the user to the chosen room
+      // Pet walks in from the left side of the new room
       clearTimers();
       setWalkTargetMarker(null);
-      setWalkDurationMs(0);
-      setPetState("stehen");
+      localInteractionProtectUntil.current = Date.now() + 3200;
+      const entryStart: Point = { x: -8, y: 82 };
+      const entryTarget: Point = { x: 36, y: 82 };
+      suppressCameraFollowRef.current = true; // hold camera at center while pet is off-screen
       setPetRoomId(nextBackgroundId);
-      setPetPosition({ x: 50, y: 78 });
+      setPetPosition(entryStart);
+      setFacing(1);
+      setPetState("stehen");
+      setWalkDurationMs(0);
       setScenePan({ x: 0, y: 0 });
       setBackgroundId(nextBackgroundId);
+      const enterTimer = setTimeout(() => {
+        suppressCameraFollowRef.current = false; // let camera follow when walk starts
+        const duration = 1600;
+        walkOriginRef.current = entryStart;
+        walkStartTimeRef.current = Date.now();
+        walkDurationAtStartRef.current = duration;
+        setWalkDurationMs(duration);
+        setPetState("laufen");
+        setPetPosition(entryTarget); // triggers useLayoutEffect → camera pans to entryTarget
+        const standTimer = setTimeout(() => {
+          setWalkDurationMs(0);
+          setPetState("stehen");
+        }, duration);
+        actionTimers.current.push(standTimer);
+      }, 80);
+      actionTimers.current.push(enterTimer);
     } else {
       suppressCameraFollowRef.current = true;
       requestAnimationFrame(() => { suppressCameraFollowRef.current = false; });
@@ -1118,8 +1156,8 @@ export function PetStage() {
     setPetZoomMode("normal");
     setSettingsOpen(false);
     setCameraFollowsPet(true);
-    setZoom(1);
-    requestAnimationFrame(() => setScenePan(getFocusPan(nextPet.position, 1)));
+    setZoom(CAMERA_FOLLOW_ZOOM);
+    requestAnimationFrame(() => setScenePan(getFocusPan(nextPet.position, CAMERA_FOLLOW_ZOOM)));
   };
 
   const toggleCameraFollow = () => {
@@ -1134,8 +1172,8 @@ export function PetStage() {
     setCameraFollowsPet((current) => {
       const next = !current;
       if (next) {
-        setZoom(1);
-        setScenePan(getFocusPan(petPosition, 1));
+        setZoom(CAMERA_FOLLOW_ZOOM);
+        setScenePan(getFocusPan(petPosition, CAMERA_FOLLOW_ZOOM));
       } else {
         const nextZoom = window.matchMedia(MOBILE_MEDIA_QUERY).matches ? MIN_ZOOM : zoom;
         setZoom(nextZoom);
