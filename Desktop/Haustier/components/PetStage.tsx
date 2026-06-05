@@ -77,6 +77,7 @@ const SETTINGS_ICON = "/assets/backgrounds/UI/settings.png";
 const POSITION_IMAGE = "/assets/backgrounds/UI/position.png";
 const HEART_IMAGE = "/assets/backgrounds/UI/heart.png";
 const POOP_IMAGE = "/assets/backgrounds/UI/poop.png";
+const INSPECT_IMAGE = "/assets/backgrounds/UI/inspect.png";
 const BALL_CENTER: Point = { x: 50, y: 82 };
 const BALL_BOUNDS = { minX: 7, maxX: 93, minY: MOVEMENT_AREA.minY, maxY: MOVEMENT_AREA.maxY };
 const BALL_AIR_BOUNDS = { minY: 8, floorY: BALL_CENTER.y };
@@ -100,7 +101,7 @@ const FOCUS_ZOOM = 1.45;
 const CAMERA_FOLLOW_ZOOM = 1.4;
 const CLOSE_ZOOM = 2.6;
 const DOUBLE_CLICK_MS = 350;
-const STROKE_HEART_DISTANCE = 26;
+const STROKE_HEART_DISTANCE = 70;
 const STROKE_MOOD_COOLDOWN_MS = 700;
 const BACKGROUND_WIDTH = 1672;
 const BACKGROUND_HEIGHT = 941;
@@ -2161,8 +2162,8 @@ export function PetStage() {
                 <button className="closeFocus" onClick={handleFocusBack} type="button">
                   Back
                 </button>
-                <button className="inspectButton" onClick={() => zoomCloseToPet()} type="button">
-                  Inspect
+                <button aria-label="Inspect" className="inspectButton" onClick={() => zoomCloseToPet()} type="button">
+                  <NextImage alt="Inspect" draggable={false} fill sizes="24px" src={INSPECT_IMAGE} />
                 </button>
               </div>
             </section>
@@ -2253,17 +2254,6 @@ export function PetStage() {
         {!focusedPet ? (
           <div className="controls" aria-label="Controls">
             <div className="controlMenu" aria-label="Control menu">
-                <button
-                  aria-label={settingsOpen ? "Settings" : "Follow pet camera"}
-                  aria-pressed={settingsOpen || cameraFollowsPet}
-                  className={`iconControlButton cameraFollowButton${settingsOpen || cameraFollowsPet ? " active" : ""}`}
-                  onClick={handleCameraButtonClick}
-                  onPointerUp={(event) => event.currentTarget.blur()}
-                  title="Follow pet camera. Click 5 times quickly for settings."
-                  type="button"
-                >
-                  <NextImage alt="" draggable={false} fill sizes="36px" src={settingsOpen ? SETTINGS_ICON : CAM_ICON} />
-                </button>
                 {poops.length > 0 ? (
                   <button
                     aria-label={`${poops.length} poop pile${poops.length > 1 ? "s" : ""} – tap to go there`}
@@ -2275,6 +2265,17 @@ export function PetStage() {
                     <span aria-hidden="true">!</span>
                   </button>
                 ) : null}
+                <button
+                  aria-label={settingsOpen ? "Settings" : "Follow pet camera"}
+                  aria-pressed={settingsOpen || cameraFollowsPet}
+                  className={`iconControlButton cameraFollowButton${settingsOpen || cameraFollowsPet ? " active" : ""}`}
+                  onClick={handleCameraButtonClick}
+                  onPointerUp={(event) => event.currentTarget.blur()}
+                  title="Follow pet camera. Click 5 times quickly for settings."
+                  type="button"
+                >
+                  <NextImage alt="" draggable={false} fill sizes="36px" src={settingsOpen ? SETTINGS_ICON : CAM_ICON} />
+                </button>
                 <select className="select" disabled={isDead} onChange={(event) => changeBackground(event.target.value)} value={backgroundId}>
                   {BACKGROUNDS.map((background) => (
                     <option key={background.id} value={background.id}>
