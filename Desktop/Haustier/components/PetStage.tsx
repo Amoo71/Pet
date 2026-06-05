@@ -75,6 +75,7 @@ const MOOD_ICON = "/assets/backgrounds/UI/mood.png";
 const CAM_ICON = "/assets/backgrounds/UI/cam.png";
 const SETTINGS_ICON = "/assets/backgrounds/UI/settings.png";
 const POSITION_IMAGE = "/assets/backgrounds/UI/position.png";
+const HEART_IMAGE = "/assets/backgrounds/UI/heart.png";
 const BALL_CENTER: Point = { x: 50, y: 82 };
 const BALL_BOUNDS = { minX: 7, maxX: 93, minY: MOVEMENT_AREA.minY, maxY: MOVEMENT_AREA.maxY };
 const BALL_AIR_BOUNDS = { minY: 8, floorY: BALL_CENTER.y };
@@ -724,8 +725,9 @@ export function PetStage() {
     setFocusedPet(false);
     viewBeforeFocus.current = { zoom, pan: scenePan };
     setPetZoomMode("close");
+    const visualPos = targetPet.id === selectedPetId ? getVisualPetPosition() : targetPet.position;
     setZoom(CLOSE_ZOOM);
-    setScenePan(getFocusPan(targetPet.position, CLOSE_ZOOM, true));
+    setScenePan(getFocusPan(visualPos, CLOSE_ZOOM, true));
   };
 
   const spawnHeart = (clientX: number, clientY: number) => {
@@ -794,18 +796,19 @@ export function PetStage() {
       return;
     }
 
-    if (selectedPet.roomId !== backgroundId) return;
-
     const { x: worldX, y: worldY } = getScenePoint(event.clientX, event.clientY);
-    const clickedSky = SKY_BACKGROUNDS.has(activeBackground.id) && worldY < MOVEMENT_AREA.minY;
-    const clickedAboveHead =
-      Math.abs(worldX - petPosition.x) <= PET_JUMP_X_RANGE &&
-      worldY >= petPosition.y - PET_HEAD_OFFSET - PET_HEAD_CLICK_RANGE &&
-      worldY <= petPosition.y - PET_HEAD_OFFSET + PET_HEAD_CLICK_RANGE;
 
-    if (clickedSky || clickedAboveHead) {
-      jump();
-      return;
+    if (selectedPet.roomId === backgroundId) {
+      const clickedSky = SKY_BACKGROUNDS.has(activeBackground.id) && worldY < MOVEMENT_AREA.minY;
+      const clickedAboveHead =
+        Math.abs(worldX - petPosition.x) <= PET_JUMP_X_RANGE &&
+        worldY >= petPosition.y - PET_HEAD_OFFSET - PET_HEAD_CLICK_RANGE &&
+        worldY <= petPosition.y - PET_HEAD_OFFSET + PET_HEAD_CLICK_RANGE;
+
+      if (clickedSky || clickedAboveHead) {
+        jump();
+        return;
+      }
     }
 
     const target = {
@@ -818,7 +821,37 @@ export function PetStage() {
   };
 
   const walkTo = (target: Point) => {
-    if (selectedPet.roomId !== backgroundId) return;
+    if (selectedPet.roomId !== backgroundId) {
+      // Pet is in a different room — teleport it here and walk to target
+      markInteraction();
+      clearTimers();
+      setFocusedPet(false);
+      const entryX = target.x < 50 ? 15 : 85;
+      const entry: Point = { x: entryX, y: target.y };
+      setPetRoomId(backgroundId);
+      setPetPosition(entry);
+      setFacing(target.x < entryX ? -1 : 1);
+      walkOriginRef.current = entry;
+      setPetState("stehen");
+      setWalkDurationMs(0);
+      const duration = getWalkDuration(entry, target);
+      const timer = setTimeout(() => {
+        walkOriginRef.current = entry;
+        walkStartTimeRef.current = Date.now();
+        walkDurationAtStartRef.current = duration;
+        setWalkDurationMs(duration);
+        setPetState("laufen");
+        setPetPosition(target);
+        const standTimer = setTimeout(() => {
+          setWalkTargetMarker(null);
+          setWalkDurationMs(0);
+          setPetState("stehen");
+        }, duration);
+        actionTimers.current.push(standTimer);
+      }, 80);
+      actionTimers.current.push(timer);
+      return;
+    }
     markInteraction();
     const currentPos = getVisualPetPosition();
     clearTimers();
@@ -933,15 +966,28 @@ export function PetStage() {
     if (isDead) return;
     if (nextBackgroundId === backgroundId) return;
 
-    suppressCameraFollowRef.current = true;
-    requestAnimationFrame(() => { suppressCameraFollowRef.current = false; });
     setPetZoomMode("normal");
     setFocusedPet(false);
     setActiveInventoryCategory(null);
-    setCameraFollowsPet(false);
-    setScenePan({ x: 0, y: 0 });
-    setBackgroundId(nextBackgroundId);
     setSettingsOpen(false);
+
+    if (cameraFollowsPet) {
+      // Pet follows the user to the chosen room
+      clearTimers();
+      setWalkTargetMarker(null);
+      setWalkDurationMs(0);
+      setPetState("stehen");
+      setPetRoomId(nextBackgroundId);
+      setPetPosition({ x: 50, y: 78 });
+      setScenePan({ x: 0, y: 0 });
+      setBackgroundId(nextBackgroundId);
+    } else {
+      suppressCameraFollowRef.current = true;
+      requestAnimationFrame(() => { suppressCameraFollowRef.current = false; });
+      setCameraFollowsPet(false);
+      setScenePan({ x: 0, y: 0 });
+      setBackgroundId(nextBackgroundId);
+    }
   };
 
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -1777,7 +1823,10 @@ export function PetStage() {
           className="floatingHeart"
           key={heart.id}
           style={{ left: `${heart.x}px`, top: `${heart.y}px` } as CSSProperties}
-        />
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="" draggable={false} src={HEART_IMAGE} />
+        </div>
       ))}
       <section className="gameCard" aria-label="Pet game">
         <div
