@@ -1109,6 +1109,7 @@ export function PetStage() {
 
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (isDead) return;
+    if (petZoomMode === "close") return;
     if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote, .petSprite")) return;
     if (cameraFollowsPet) {
       setCameraFollowsPet(false);
@@ -2251,7 +2252,7 @@ export function PetStage() {
           </section>
         ) : null}
 
-        {!focusedPet ? (
+        {!focusedPet && petZoomMode !== "close" ? (
           <div className="controls" aria-label="Controls">
             <div className="controlMenu" aria-label="Control menu">
                 {poops.length > 0 ? (

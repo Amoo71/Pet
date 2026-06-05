@@ -1529,11 +1529,11 @@ input {
 .inspectButton {
   position: relative;
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: none;
   background: rgba(255, 255, 255, 0.07);
   cursor: pointer;
   transition: background 0.15s, transform 0.15s;
@@ -1541,32 +1541,34 @@ input {
 
 .inspectButton:hover {
   background: rgba(255, 255, 255, 0.14);
-  transform: scale(1.04);
+  transform: scale(1.06);
 }
 
 .inspectButton:active {
-  transform: scale(0.96);
+  transform: scale(0.94);
 }
 
 .inspectBackButton {
   position: fixed;
-  bottom: 24px;
-  left: 20px;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 120;
-  padding: 10px 22px;
+  padding: 12px 36px;
   border-radius: 999px;
   border: 1.5px solid rgba(255, 255, 255, 0.22);
-  background: rgba(20, 20, 30, 0.72);
-  backdrop-filter: blur(10px) saturate(1.4);
+  background: rgba(20, 20, 30, 0.78);
+  backdrop-filter: blur(12px) saturate(1.4);
   color: var(--text);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   font-weight: 900;
   cursor: pointer;
   transition: background 120ms ease, scale 100ms var(--ease-spring);
+  white-space: nowrap;
 }
 
 .inspectBackButton:hover {
-  background: rgba(40, 40, 60, 0.85);
+  background: rgba(40, 40, 60, 0.88);
 }
 
 .inspectBackButton:active {
