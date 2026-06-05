@@ -1064,7 +1064,6 @@ export function PetStage() {
     if (isDead) return;
     if (nextBackgroundId === backgroundId) return;
 
-    setPetZoomMode("normal");
     setFocusedPet(false);
     setActiveInventoryCategory(null);
     setSettingsOpen(false);
@@ -1271,6 +1270,7 @@ export function PetStage() {
   };
 
   const handleCameraButtonClick = () => {
+    if (petZoomMode === "close") return;
     const now = Date.now();
     if (now - firstCameraClickAt.current > SETTINGS_CLICK_WINDOW_MS) {
       firstCameraClickAt.current = now;
@@ -2286,6 +2286,17 @@ export function PetStage() {
             </div>
           </div>
         ) : null}
+
+      {petZoomMode === "close" ? (
+        <button
+          aria-label="Exit inspect mode"
+          className="inspectBackButton"
+          onClick={exitCloseZoom}
+          type="button"
+        >
+          Back
+        </button>
+      ) : null}
 
       </section>
     </main>

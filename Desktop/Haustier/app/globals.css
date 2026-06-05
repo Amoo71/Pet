@@ -1547,3 +1547,28 @@ input {
 .inspectButton:active {
   transform: scale(0.96);
 }
+
+.inspectBackButton {
+  position: fixed;
+  bottom: 24px;
+  left: 20px;
+  z-index: 120;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  background: rgba(20, 20, 30, 0.72);
+  backdrop-filter: blur(10px) saturate(1.4);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 120ms ease, scale 100ms var(--ease-spring);
+}
+
+.inspectBackButton:hover {
+  background: rgba(40, 40, 60, 0.85);
+}
+
+.inspectBackButton:active {
+  scale: 0.95;
+}
