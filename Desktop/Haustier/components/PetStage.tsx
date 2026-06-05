@@ -103,6 +103,8 @@ const CLOSE_ZOOM = 2.6;
 const DOUBLE_CLICK_MS = 350;
 const STROKE_HEART_DISTANCE = 70;
 const STROKE_MOOD_COOLDOWN_MS = 700;
+// 0-based index of the sitzen frame to freeze on while stroking, per variant
+const STROKE_FRAME_INDEX: Record<string, number> = { pet: 6, pet2: 4, pet3: 3 };
 const BACKGROUND_WIDTH = 1672;
 const BACKGROUND_HEIGHT = 941;
 const BACKGROUND_ASPECT_RATIO = BACKGROUND_WIDTH / BACKGROUND_HEIGHT;
@@ -160,6 +162,7 @@ export function PetStage() {
   const [sleepOwnerId, setSleepOwnerId] = useState("server");
   const [petZoomMode, setPetZoomMode] = useState<"normal" | "close">("normal");
   const petZoomModeRef = useRef<"normal" | "close">("normal");
+  const [isStroking, setIsStroking] = useState(false);
   const [hearts, setHearts] = useState<Array<{ id: string; x: number; y: number; dx: number; rot: number }>>([]);
   const [poops, setPoops] = useState<SharedPoop[]>([]);
   const selectedPet = pets.find((pet) => pet.id === selectedPetId) ?? pets[0] ?? createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo");
@@ -838,6 +841,7 @@ export function PetStage() {
     event.currentTarget.setPointerCapture(event.pointerId);
     strokeRef.current = { lastX: event.clientX, lastY: event.clientY };
     strokeDistanceRef.current = 0;
+    setIsStroking(true);
   };
 
   const movePetStroke = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -876,6 +880,7 @@ export function PetStage() {
 
   const endPetStroke = () => {
     strokeRef.current = null;
+    setIsStroking(false);
   };
 
   const handleFocusBack = () => {
@@ -1981,15 +1986,23 @@ export function PetStage() {
             {petsInRoom.map((pet) => {
               const variant = PET_VARIANTS.find((entry) => entry.id === pet.assetKey) ?? PET_VARIANTS[0];
               const state = variant?.states[pet.state] ?? PET_STATES[pet.state];
-              const frames = state.frames.length > 0 ? state.frames : PET_STATES.stehen.frames;
+              const allFrames = state.frames.length > 0 ? state.frames : PET_STATES.stehen.frames;
+              const isStrokeTarget = petZoomMode === "close" && pet.id === selectedPetId;
+              let frames: typeof allFrames;
+              if (isStrokeTarget && isStroking) {
+                const idx = Math.min(STROKE_FRAME_INDEX[pet.assetKey] ?? 0, allFrames.length - 1);
+                frames = [allFrames[idx]] as unknown as typeof allFrames;
+              } else if (isStrokeTarget) {
+                frames = [allFrames[0]] as unknown as typeof allFrames;
+              } else {
+                frames = allFrames;
+              }
               const style = {
                 "--pet-x": `${pet.position.x}%`,
                 "--pet-y": `${pet.position.y}%`,
                 "--pet-facing": pet.facing,
                 "--pet-walk-duration": `${pet.walkDurationMs}ms`
               } as CSSProperties;
-
-              const isStrokeTarget = petZoomMode === "close" && pet.id === selectedPetId;
               return (
                 <AnimatedSprite
                   className={`petSprite${pet.id === selectedPetId ? " selected" : ""}${pet.state === "springen" ? " jumping" : ""}${pet.state === "sleep" ? " sleeping" : ""}${isStrokeTarget ? " strokeTarget" : ""}`}

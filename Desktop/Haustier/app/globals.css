@@ -1529,23 +1529,26 @@ input {
 .inspectButton {
   position: relative;
   flex-shrink: 0;
-  width: 42px;
-  height: 42px;
-  padding: 0;
+  width: 46px;
+  height: 46px;
+  padding: 4px;
   border-radius: 999px;
   border: none;
-  background: rgba(255, 255, 255, 0.07);
+  background: none;
   cursor: pointer;
-  transition: background 0.15s, transform 0.15s;
+  transition: transform 0.15s;
+}
+
+.inspectButton img {
+  object-fit: contain !important;
 }
 
 .inspectButton:hover {
-  background: rgba(255, 255, 255, 0.14);
-  transform: scale(1.06);
+  transform: scale(1.1);
 }
 
 .inspectButton:active {
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 
 .inspectBackButton {
