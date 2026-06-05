@@ -20,7 +20,7 @@ type Point = {
 
 type NoteTemplate = "note1" | "note2";
 type InventoryCategory = "play" | "feed" | "sleep" | "notes";
-type TrayItem = "ball" | "ball2" | "steak" | "bone" | "napf" | "snacks" | "bed" | "bed2" | NoteTemplate;
+type TrayItem = "ball" | "ball2" | "steak" | "bone" | "napf" | "snacks" | "bed" | "bed2" | "bed3" | NoteTemplate;
 
 const initialStats: PetStats = {
   hunger: 62,
@@ -58,6 +58,7 @@ const FOOD_IMAGES = {
 } satisfies Record<"steak" | "bone" | "napf" | "snacks", string>;
 const BED_IMAGE = "/assets/items/bett.png";
 const BED2_IMAGE = "/assets/items/bett2.png";
+const BED3_IMAGE = "/assets/items/bett3.png";
 const NOTE_IMAGES: Record<NoteTemplate, string> = {
   note1: "/assets/items/notiz1.png",
   note2: "/assets/items/notiz2.png"
@@ -448,6 +449,7 @@ export function PetStage() {
       FOOD_IMAGES.snacks,
       BED_IMAGE,
       BED2_IMAGE,
+      BED3_IMAGE,
       NOTE_IMAGES.note1,
       NOTE_IMAGES.note2,
       HUNGER_ICON,
@@ -2076,6 +2078,7 @@ function getTrayImage(item: TrayItem) {
   if (item === "snacks") return FOOD_IMAGES.snacks;
   if (item === "bed") return BED_IMAGE;
   if (item === "bed2") return BED2_IMAGE;
+  if (item === "bed3") return BED3_IMAGE;
   return NOTE_IMAGES[item];
 }
 
@@ -2088,6 +2091,7 @@ function getTrayLabel(item: TrayItem) {
   if (item === "snacks") return "Snack";
   if (item === "bed") return "Bed";
   if (item === "bed2") return "Bed 2";
+  if (item === "bed3") return "Bed 3";
   return item === "note1" ? "Note 1" : "Note 2";
 }
 
@@ -2098,13 +2102,14 @@ function getTrayImageReady(item: TrayItem, ballReady: boolean, foodReady: boolea
   if (item === "bone" || item === "napf" || item === "snacks") return true;
   if (item === "bed") return bedReady;
   if (item === "bed2") return true;
+  if (item === "bed3") return true;
   return noteReady[item];
 }
 
 function getInventoryItems(category: InventoryCategory): TrayItem[] {
   if (category === "play") return ["ball", "ball2"];
   if (category === "feed") return ["steak", "bone", "napf", "snacks"];
-  if (category === "sleep") return ["bed", "bed2"];
+  if (category === "sleep") return ["bed", "bed2", "bed3"];
   return ["note1", "note2"];
 }
 
