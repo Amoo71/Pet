@@ -121,7 +121,7 @@ export function AnimatedSprite({
         <img
           alt=""
           className={`spriteFrame${frame === activeFrame ? " active" : " neighbor"}`}
-          decoding="sync"
+          decoding="async"
           draggable={false}
           key={frame}
           loading="eager"

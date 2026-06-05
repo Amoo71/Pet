@@ -82,8 +82,8 @@ const NOTE_BOUNDS = { minX: 9, maxX: 91, minY: 8, maxY: 70 };
 const BALL_GRAVITY = 95;
 const ITEM_GRAVITY = 110;
 const SYNC_INTERVAL_MS = 250;
-const SYNC_DEBOUNCE_MS = 90;
-const LOCAL_INTERACTION_PROTECT_MS = 1400;
+const SYNC_DEBOUNCE_MS = 60;
+const LOCAL_INTERACTION_PROTECT_MS = 900;
 const NAME_SAVE_DEBOUNCE_MS = 2000;
 const SETTINGS_CLICK_COUNT = 5;
 const SETTINGS_CLICK_WINDOW_MS = 1_500;
@@ -94,7 +94,7 @@ const MIN_ZOOM = 0.82;
 const WHEEL_ZOOM_STEP = 0.025;
 const BED_WALK_INTO_OFFSET_Y = 10;
 const BED_SLEEP_OFFSET_Y = 3;
-const FOCUS_ZOOM = 1.55;
+const FOCUS_ZOOM = 1.45;
 const BACKGROUND_WIDTH = 1672;
 const BACKGROUND_HEIGHT = 941;
 const BACKGROUND_ASPECT_RATIO = BACKGROUND_WIDTH / BACKGROUND_HEIGHT;
@@ -586,8 +586,9 @@ export function PetStage() {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
+    // ballRotation and ballTransitionMs are visual-only and change every physics frame — excluded to prevent sync spam
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pets, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballRotation, ballTransitionMs, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes]);
+  }, [pets, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes]);
 
   useEffect(() => {
     if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
@@ -756,7 +757,7 @@ export function PetStage() {
         }
       }, duration);
       actionTimers.current.push(standTimer);
-    }, petState === "sitzen" ? 420 : 80);
+    }, petState === "sitzen" ? 180 : 40);
     actionTimers.current.push(timer);
   };
 
@@ -826,8 +827,8 @@ export function PetStage() {
     setFocusedPet(false);
 
     setPetState("stehen");
-    const jumpTimer = setTimeout(() => setPetState("springen"), petState === "sitzen" ? 280 : 40);
-    const standTimer = setTimeout(() => setPetState("stehen"), petState === "sitzen" ? 1150 : 900);
+    const jumpTimer = setTimeout(() => setPetState("springen"), petState === "sitzen" ? 120 : 30);
+    const standTimer = setTimeout(() => setPetState("stehen"), petState === "sitzen" ? 980 : 780);
     actionTimers.current.push(jumpTimer, standTimer);
   };
 
@@ -1375,7 +1376,7 @@ export function PetStage() {
       setPetState("sleep");
       setSleepOwnerId(clientId.current);
       setSleepEndsAt(Date.now() + SLEEP_DURATION_MS);
-    }, 14);
+    }, 22);
   };
 
   const startBallDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -1414,8 +1415,8 @@ export function PetStage() {
       if (noteDragging) finishNoteDrop();
     };
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("pointerup", handlePointerUp, { passive: true });
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
@@ -1520,8 +1521,8 @@ export function PetStage() {
       });
 
       const speed = Math.hypot(foodVelocity.current.x, foodVelocity.current.y);
-      const landed = Math.abs(foodPositionRef.current.y - BALL_AIR_BOUNDS.floorY) < 0.4;
-      if (landed && speed < 3) {
+      const landed = Math.abs(foodPositionRef.current.y - BALL_AIR_BOUNDS.floorY) < 0.6;
+      if (landed && speed < 5) {
         foodVelocity.current = { x: 0, y: 0 };
         finishFoodPlacement(foodPositionRef.current);
         return;
@@ -1549,23 +1550,23 @@ export function PetStage() {
       setBedPosition((current) => {
         let nextX = current.x + bedVelocity.current.x * deltaSeconds;
         let nextY = current.y + bedVelocity.current.y * deltaSeconds;
-        let velocityX = bedVelocity.current.x * 0.94;
-        let velocityY = (bedVelocity.current.y + ITEM_GRAVITY * deltaSeconds) * 0.99;
+        let velocityX = bedVelocity.current.x * 0.88;
+        let velocityY = (bedVelocity.current.y + ITEM_GRAVITY * deltaSeconds) * 0.97;
 
         if (nextX < BALL_BOUNDS.minX || nextX > BALL_BOUNDS.maxX) {
           nextX = clampPosition(nextX, BALL_BOUNDS.minX, BALL_BOUNDS.maxX);
-          velocityX *= -0.35;
+          velocityX *= -0.25;
         }
 
         if (nextY < BALL_AIR_BOUNDS.minY) {
           nextY = BALL_AIR_BOUNDS.minY;
-          velocityY *= -0.25;
+          velocityY *= -0.15;
         }
 
         if (nextY > BALL_AIR_BOUNDS.floorY) {
           nextY = BALL_AIR_BOUNDS.floorY;
-          velocityY *= -0.22;
-          velocityX *= 0.62;
+          velocityY *= -0.1;
+          velocityX *= 0.4;
         }
 
         const nextPosition = { x: nextX, y: nextY };
@@ -1575,8 +1576,8 @@ export function PetStage() {
       });
 
       const speed = Math.hypot(bedVelocity.current.x, bedVelocity.current.y);
-      const landed = Math.abs(bedPositionRef.current.y - BALL_AIR_BOUNDS.floorY) < 0.4;
-      if (landed && speed < 3) {
+      const landed = Math.abs(bedPositionRef.current.y - BALL_AIR_BOUNDS.floorY) < 0.8;
+      if (landed && speed < 6) {
         bedVelocity.current = { x: 0, y: 0 };
         finishBedPlacement(bedPositionRef.current);
         return;

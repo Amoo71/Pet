@@ -97,24 +97,27 @@ export async function POST(request: Request) {
 async function readState() {
   try {
     const parsed = await readRemoteState() ?? await readFileState();
-    memoryState = applyLifecycle({
+    const now = Date.now();
+    const merged: SharedGameState = {
       ...DEFAULT_SHARED_GAME_STATE,
       ...parsed,
       stats: { ...DEFAULT_SHARED_GAME_STATE.stats, ...parsed.stats },
-      lifecycle: { ...getDefaultLifecycle(Date.now()), ...parsed.lifecycle },
+      lifecycle: { ...getDefaultLifecycle(now), ...parsed.lifecycle },
       pet: { ...DEFAULT_SHARED_GAME_STATE.pet, ...parsed.pet },
-      pets: normalizePets(parsed, Date.now()),
+      pets: normalizePets(parsed, now),
       ball: { ...DEFAULT_SHARED_GAME_STATE.ball, ...parsed.ball },
       food: { ...DEFAULT_SHARED_GAME_STATE.food, ...parsed.food },
       bed: { ...DEFAULT_SHARED_GAME_STATE.bed, ...parsed.bed },
       notes: parsed.notes ?? DEFAULT_SHARED_GAME_STATE.notes
-    } as SharedGameState, Date.now());
+    } as SharedGameState;
+    const appliedOnce = applyLifecycle(merged, now);
+    if (appliedOnce !== memoryState) {
+      memoryState = appliedOnce;
+      if (appliedOnce !== merged) await writeState(appliedOnce);
+    }
   } catch {
     await writeState(memoryState);
   }
-
-  const appliedState = applyLifecycle(memoryState, Date.now());
-  if (appliedState !== memoryState) await writeState(appliedState);
 
   return memoryState;
 }
