@@ -39,6 +39,13 @@ export type SharedPet = {
   autoExitAt: number;
 };
 
+export type SharedPoop = {
+  id: string;
+  roomId: string;
+  position: Point;
+  createdAt: number;
+};
+
 export type SharedNote = {
   id: string;
   roomId: string;
@@ -88,6 +95,7 @@ export type SharedGameState = {
     sleepOwnerId: string;
   };
   notes: SharedNote[];
+  poops: SharedPoop[];
 };
 
 export const DEFAULT_SHARED_GAME_STATE: SharedGameState = {
@@ -169,5 +177,6 @@ export const DEFAULT_SHARED_GAME_STATE: SharedGameState = {
     sleepEndsAt: 0,
     sleepOwnerId: "server"
   },
-  notes: []
+  notes: [],
+  poops: []
 };

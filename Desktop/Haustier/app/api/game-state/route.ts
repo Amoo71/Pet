@@ -3,7 +3,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { createClient, type RedisClientType } from "redis";
 import { BACKGROUNDS } from "@/lib/gameConfig";
-import { DEFAULT_SHARED_GAME_STATE, type SharedGameState, type SharedPet } from "@/lib/sharedGameState";
+import { DEFAULT_SHARED_GAME_STATE, type SharedGameState, type SharedPet, type SharedPoop } from "@/lib/sharedGameState";
 
 export const runtime = "nodejs";
 
@@ -42,6 +42,7 @@ export async function PUT(request: Request) {
     food: { ...current.food, ...incoming.food },
     bed: { ...current.bed, ...incoming.bed },
     notes: mergeNotes(current.notes, incoming.notes, incoming.version ?? -1, current.version),
+    poops: incoming.poops ?? current.poops ?? [],
     version: current.version + 1,
     updatedAt: Date.now(),
     updatedBy: incoming.updatedBy ?? "unknown"
@@ -87,7 +88,8 @@ export async function POST(request: Request) {
       roomId,
       position: { ...DEFAULT_SHARED_GAME_STATE.bed.position }
     },
-    notes: []
+    notes: [],
+    poops: []
   };
 
   await writeState(restartState);
@@ -108,7 +110,8 @@ async function readState() {
       ball: { ...DEFAULT_SHARED_GAME_STATE.ball, ...parsed.ball },
       food: { ...DEFAULT_SHARED_GAME_STATE.food, ...parsed.food },
       bed: { ...DEFAULT_SHARED_GAME_STATE.bed, ...parsed.bed },
-      notes: parsed.notes ?? DEFAULT_SHARED_GAME_STATE.notes
+      notes: parsed.notes ?? DEFAULT_SHARED_GAME_STATE.notes,
+      poops: parsed.poops ?? []
     } as SharedGameState;
     const appliedOnce = applyLifecycle(merged, now);
     if (appliedOnce !== memoryState) {

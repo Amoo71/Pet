@@ -5,7 +5,7 @@ import type { CSSProperties, MouseEvent, PointerEvent, WheelEvent } from "react"
 import NextImage from "next/image";
 import { AnimatedSprite } from "@/components/AnimatedSprite";
 import { BACKGROUNDS, PET_STATES, PET_VARIANTS, type PetStateId } from "@/lib/gameConfig";
-import type { SharedGameState, SharedNote, SharedPet } from "@/lib/sharedGameState";
+import type { SharedGameState, SharedNote, SharedPet, SharedPoop } from "@/lib/sharedGameState";
 
 type PetStats = {
   hunger: number;
@@ -76,6 +76,7 @@ const CAM_ICON = "/assets/backgrounds/UI/cam.png";
 const SETTINGS_ICON = "/assets/backgrounds/UI/settings.png";
 const POSITION_IMAGE = "/assets/backgrounds/UI/position.png";
 const HEART_IMAGE = "/assets/backgrounds/UI/heart.png";
+const POOP_IMAGE = "/assets/backgrounds/UI/poop.png";
 const BALL_CENTER: Point = { x: 50, y: 82 };
 const BALL_BOUNDS = { minX: 7, maxX: 93, minY: MOVEMENT_AREA.minY, maxY: MOVEMENT_AREA.maxY };
 const BALL_AIR_BOUNDS = { minY: 8, floorY: BALL_CENTER.y };
@@ -157,7 +158,8 @@ export function PetStage() {
   const [sleepEndsAt, setSleepEndsAt] = useState(0);
   const [sleepOwnerId, setSleepOwnerId] = useState("server");
   const [petZoomMode, setPetZoomMode] = useState<"normal" | "close">("normal");
-  const [hearts, setHearts] = useState<Array<{ id: string; x: number; y: number }>>([]);
+  const [hearts, setHearts] = useState<Array<{ id: string; x: number; y: number; dx: number; rot: number }>>([]);
+  const [poops, setPoops] = useState<SharedPoop[]>([]);
   const selectedPet = pets.find((pet) => pet.id === selectedPetId) ?? pets[0] ?? createDefaultPet("pet1", DEFAULT_PET_VARIANT, "Momo");
   const petName = selectedPet.name;
   const petState = selectedPet.state;
@@ -205,6 +207,8 @@ export function PetStage() {
   const strokeRef = useRef<{ lastX: number; lastY: number } | null>(null);
   const strokeDistanceRef = useRef(0);
   const strokeMoodCooldownRef = useRef(0);
+  const petInteractionRef = useRef<number>(0);
+  const schedulePoopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
     setPets((currentPets) => currentPets.map((pet) => pet.id === selectedPetId ? { ...updater(pet), updatedAt: Date.now() } : pet));
@@ -300,6 +304,8 @@ export function PetStage() {
   const trayItems = activeInventoryCategory ? getInventoryItems(activeInventoryCategory) : [];
   const viewingNote = viewingNoteId ? notes.find((note) => note.id === viewingNoteId) : undefined;
   const isDead = lifecycle.deadAt > 0;
+  const isDeadRef = useRef(isDead);
+  const selectedPetRoomRef = useRef(selectedPet.roomId);
   const petsInRoom = pets.filter((pet) => pet.roomId === backgroundId);
   const canSwitchPet = pets.length > 1;
 
@@ -388,7 +394,8 @@ export function PetStage() {
         sleepEndsAt,
         sleepOwnerId
       },
-      notes
+      notes,
+      poops
     };
   }
 
@@ -420,6 +427,7 @@ export function PetStage() {
     setSleepOwnerId(remoteState.bed.sleepOwnerId);
     bedPositionRef.current = remoteState.bed.position;
     setNotes(remoteState.notes ?? []);
+    setPoops(remoteState.poops ?? []);
   }
 
   async function pushState() {
@@ -610,7 +618,7 @@ export function PetStage() {
     };
     // ballRotation and ballTransitionMs are visual-only and change every physics frame — excluded to prevent sync spam
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pets, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes]);
+  }, [pets, ballVisible, ballRoomId, ballImageSrc, ballPosition, ballLastPlayerTouchedAt, foodVisible, foodRoomId, foodImageSrc, foodPosition, bedVisible, bedRoomId, bedImageSrc, bedPosition, sleepEndsAt, sleepOwnerId, notes, poops]);
 
   useEffect(() => {
     if (ballDespawnTimer.current) clearTimeout(ballDespawnTimer.current);
@@ -651,6 +659,9 @@ export function PetStage() {
     bedPositionRef.current = bedPosition;
   }, [bedPosition]);
 
+  useEffect(() => { isDeadRef.current = isDead; }, [isDead]);
+  useEffect(() => { selectedPetRoomRef.current = selectedPet.roomId; }, [selectedPet.roomId]);
+
   useEffect(() => {
     if (!isDead) return;
     clearTimers();
@@ -664,6 +675,77 @@ export function PetStage() {
     return () => cancelAnimationFrame(animationFrame);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDead]);
+
+  // Autonomous wander: when sitting idle, randomly walk or jump
+  useEffect(() => {
+    if (isDead || petState !== "sitzen") return;
+    const delay = 10_000 + Math.random() * 18_000;
+    const timer = setTimeout(() => {
+      if (Date.now() < localInteractionProtectUntil.current) return;
+      const r = Math.random();
+      if (r < 0.55) {
+        movePetTo({
+          x: clampPosition(12 + Math.random() * 70, 12, 88),
+          y: clampPosition(74 + Math.random() * 12, 73, 88)
+        });
+      } else if (r < 0.72) {
+        setPetState("stehen");
+        actionTimers.current.push(setTimeout(() => {
+          setPetState("springen");
+          actionTimers.current.push(setTimeout(() => setPetState("stehen"), 800));
+        }, 60));
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDead, petState]);
+
+  // 2-pet proximity interaction: face each other and greet
+  useEffect(() => {
+    if (pets.length < 2 || isDead) return;
+    const other = pets.find((p) => p.id !== selectedPetId);
+    if (!other || other.roomId !== backgroundId || selectedPet.roomId !== backgroundId) return;
+    const dist = Math.abs(other.position.x - petPosition.x);
+    if (dist > 18) return;
+    const now = Date.now();
+    if (now - petInteractionRef.current < 28_000) return;
+    if (now < localInteractionProtectUntil.current) return;
+    petInteractionRef.current = now;
+    protectLocalInteraction(now);
+    setFacing(other.position.x > petPosition.x ? 1 : -1);
+    if (Math.random() < 0.6) {
+      clearTimers();
+      actionTimers.current.push(setTimeout(() => {
+        setPetState("springen");
+        actionTimers.current.push(setTimeout(() => setPetState("stehen"), 800));
+      }, 350));
+    } else {
+      setPetState("sitzen");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pets, backgroundId, selectedPetId, isDead]);
+
+  // Autonomous poop spawning once per session, recurring
+  useEffect(() => {
+    const schedule = () => {
+      const delay = 180_000 + Math.random() * 240_000; // 3–7 min
+      schedulePoopRef.current = setTimeout(() => {
+        if (!isDeadRef.current) {
+          // eslint-disable-next-line react-hooks/purity
+          const id = `poop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+          const x = clampPosition(18 + Math.random() * 62, 12, 88);
+          setPoops((current) => [
+            ...current,
+            { id, roomId: selectedPetRoomRef.current, position: { x, y: 88 }, createdAt: Date.now() }
+          ]);
+        }
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => { if (schedulePoopRef.current) clearTimeout(schedulePoopRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -718,12 +800,15 @@ export function PetStage() {
     viewBeforeFocus.current = { zoom, pan: scenePan };
 
     const visualPos = targetPet.id === selectedPetId ? getVisualPetPosition() : targetPet.position;
-    // Sprite is bottom-anchored (translate: -50% -100%). Compute the visual center.
-    const stage = stageRef.current;
-    const world = stage ? getSceneWorldMetrics(stage.clientWidth, stage.clientHeight) : null;
-    const spriteHeight = stage ? Math.min(340, Math.max(180, 0.26 * stage.clientWidth)) : 240;
-    const spriteHeightPct = world ? (spriteHeight / world.height) * 100 : 12;
-    const focusPos = { x: visualPos.x, y: visualPos.y - spriteHeightPct * 0.5 };
+    // Sprite is bottom-anchored (translate: -50% -100%). Center on pet's body/head.
+    // Use window dimensions to match getFocusPan's coordinate system.
+    const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+    const world = getSceneWorldMetrics(vw, vh);
+    const spriteH = Math.min(340, Math.max(180, 0.26 * vw));
+    const spriteHPct = (spriteH / world.height) * 100;
+    // 0.65 → bias toward head (65% up from the feet anchor)
+    const focusPos = { x: visualPos.x, y: visualPos.y - spriteHPct * 0.65 };
 
     // Snap the pet to its visual position so it doesn't jump after we clear timers
     setPetPosition(visualPos);
@@ -734,10 +819,12 @@ export function PetStage() {
     setScenePan(getFocusPan(focusPos, CLOSE_ZOOM, true));
   };
 
-  const spawnHeart = (clientX: number, clientY: number) => {
+  const spawnHeart = (baseX: number, baseY: number) => {
     // eslint-disable-next-line react-hooks/purity
     const id = `h-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
-    setHearts((current) => [...current.slice(-6), { id, x: clientX, y: clientY }]);
+    const dx = (Math.random() - 0.5) * 64;
+    const rot = (Math.random() - 0.5) * 50;
+    setHearts((current) => [...current.slice(-8), { id, x: baseX, y: baseY, dx, rot }]);
     setTimeout(() => setHearts((current) => current.filter((h) => h.id !== id)), 900);
   };
 
@@ -1281,7 +1368,8 @@ export function PetStage() {
         sleepEndsAt: 0,
         sleepOwnerId: "server"
       },
-      notes: []
+      notes: [],
+      poops: []
     };
 
     clearTimers();
@@ -1451,6 +1539,11 @@ export function PetStage() {
     if (!viewingNoteId) return;
     setNotes((current) => current.filter((note) => note.id !== viewingNoteId));
     setViewingNoteId(null);
+  };
+
+  const removePoopById = (id: string) => {
+    setPoops((current) => current.filter((p) => p.id !== id));
+    changeStats({ mood: 1 });
   };
 
   const startNoteDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -1860,7 +1953,7 @@ export function PetStage() {
           aria-hidden="true"
           className="floatingHeart"
           key={heart.id}
-          style={{ left: `${heart.x}px`, top: `${heart.y}px` } as CSSProperties}
+          style={{ left: `${heart.x}px`, top: `${heart.y}px`, "--heart-dx": `${heart.dx}px`, "--heart-rot": `${heart.rot}deg` } as CSSProperties}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img alt="" draggable={false} src={HEART_IMAGE} />
@@ -1963,6 +2056,20 @@ export function PetStage() {
               </div>
             ) : null}
 
+            {poops.filter((p) => p.roomId === backgroundId).map((poop) => (
+              <button
+                aria-label="Clean up"
+                className="worldPoop"
+                key={poop.id}
+                onClick={(event) => { event.stopPropagation(); removePoopById(poop.id); }}
+                onPointerDown={(event) => event.stopPropagation()}
+                style={{ "--poop-x": `${poop.position.x}%`, "--poop-y": `${poop.position.y}%` } as CSSProperties}
+                type="button"
+              >
+                <NextImage alt="" draggable={false} fill sizes="72px" src={POOP_IMAGE} />
+              </button>
+            ))}
+
             {notes.filter((note) => note.roomId === backgroundId).map((note) => (
               <button
                 aria-label="Open note"
@@ -2048,9 +2155,14 @@ export function PetStage() {
                   </div>
                 </>
               )}
-              <button className="closeFocus" onClick={handleFocusBack} type="button">
-                Back
-              </button>
+              <div className="focusPanelButtons">
+                <button className="closeFocus" onClick={handleFocusBack} type="button">
+                  Back
+                </button>
+                <button className="inspectButton" onClick={() => zoomCloseToPet()} type="button">
+                  Inspect
+                </button>
+              </div>
             </section>
           ) : null}
 
