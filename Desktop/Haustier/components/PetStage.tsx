@@ -801,6 +801,7 @@ export function PetStage() {
   };
 
   const exitCloseZoom = () => {
+    setIsStroking(false);
     setPetZoomMode("normal");
     setZoom(viewBeforeFocus.current.zoom);
     setScenePan(clampScenePan(viewBeforeFocus.current.pan, viewBeforeFocus.current.zoom));
@@ -886,7 +887,6 @@ export function PetStage() {
 
   const endPetStroke = () => {
     strokeRef.current = null;
-    setIsStroking(false);
   };
 
   const handleFocusBack = () => {
