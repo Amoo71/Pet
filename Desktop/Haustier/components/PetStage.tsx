@@ -887,6 +887,7 @@ export function PetStage() {
 
   const endPetStroke = () => {
     strokeRef.current = null;
+    setIsStroking(false);
   };
 
   const handleFocusBack = () => {
@@ -1995,14 +1996,10 @@ export function PetStage() {
               const state = variant?.states[pet.state] ?? PET_STATES[pet.state];
               const allFrames = state.frames.length > 0 ? state.frames : PET_STATES.stehen.frames;
               const isStrokeTarget = petZoomMode === "close" && pet.id === selectedPetId;
-              let frames: typeof allFrames;
-              if (isStrokeTarget && isStroking) {
+              let forcedFrame: string | undefined;
+              if (isStrokeTarget) {
                 const idx = Math.min(STROKE_FRAME_INDEX[pet.assetKey] ?? 0, allFrames.length - 1);
-                frames = [allFrames[idx]] as unknown as typeof allFrames;
-              } else if (isStrokeTarget) {
-                frames = [allFrames[0]] as unknown as typeof allFrames;
-              } else {
-                frames = allFrames;
+                forcedFrame = isStroking ? allFrames[idx] : allFrames[0];
               }
               const safeX = Math.max(2, Math.min(98, pet.position.x));
               const safeY = Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position.y));
@@ -2015,8 +2012,9 @@ export function PetStage() {
               return (
                 <AnimatedSprite
                   className={`petSprite${pet.id === selectedPetId ? " selected" : ""}${pet.state === "springen" ? " jumping" : ""}${pet.state === "sleep" ? " sleeping" : ""}${isStrokeTarget ? " strokeTarget" : ""}`}
+                  forcedFrame={forcedFrame}
                   frameMs={state.frameMs}
-                  frames={frames}
+                  frames={allFrames}
                   key={pet.id}
                   label={`${pet.name} ${state.label}`}
                   onClick={isDead || pet.lifecycle.deadAt > 0 ? undefined : (event) => handlePetClick(pet, event)}

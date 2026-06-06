@@ -11,6 +11,7 @@ type AnimatedSpriteProps = {
   frameMs: number;
   label: string;
   renderMode?: "background" | "frames";
+  forcedFrame?: string;
   onClick?: MouseEventHandler<HTMLDivElement>;
   onPointerDown?: React.PointerEventHandler<HTMLDivElement>;
   onPointerMove?: React.PointerEventHandler<HTMLDivElement>;
@@ -25,6 +26,7 @@ export function AnimatedSprite({
   frameMs,
   label,
   renderMode = "frames",
+  forcedFrame,
   onClick,
   onPointerDown,
   onPointerMove,
@@ -110,9 +112,11 @@ export function AnimatedSprite({
     return () => cancelAnimationFrame(animationFrame);
   }, [framesReady, frameMs]);
 
+  const displayFrame = forcedFrame ?? activeFrame;
+
   const frameStyle = {
     ...style,
-    backgroundImage: activeFrame ? `url(${activeFrame})` : undefined
+    backgroundImage: displayFrame ? `url(${displayFrame})` : undefined
   };
 
   if (renderMode === "background") {
@@ -129,12 +133,16 @@ export function AnimatedSprite({
     );
   }
 
+  const allVisibleFrames = forcedFrame && !visibleFrames.includes(forcedFrame)
+    ? [...visibleFrames, forcedFrame]
+    : visibleFrames;
+
   return (
     <div aria-label={label} className={className} onClick={onClick} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} role="img" style={frameStyle}>
-      {visibleFrames.map((frame) => (
+      {allVisibleFrames.map((frame) => (
         <img
           alt=""
-          className={`spriteFrame${frame === activeFrame ? " active" : " neighbor"}`}
+          className={`spriteFrame${frame === displayFrame ? " active" : " neighbor"}`}
           decoding="async"
           draggable={false}
           key={frame}
@@ -144,7 +152,7 @@ export function AnimatedSprite({
           src={frame}
         />
       ))}
-      {!activeFrame && !framesReady ? children : null}
+      {!displayFrame && !framesReady ? children : null}
     </div>
   );
 }
