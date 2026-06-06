@@ -1308,6 +1308,7 @@ export function PetStage() {
   };
 
   const togglePetSlot = (slotId: SharedPet["id"], assetKey: string) => {
+    protectLocalInteraction(Date.now());
     setPets((currentPets) => {
       const existing = currentPets.find((pet) => pet.id === slotId);
       if (existing) {
@@ -1323,6 +1324,7 @@ export function PetStage() {
 
   const removePetSlot = (slotId: SharedPet["id"]) => {
     if (slotId === "pet1") return;
+    protectLocalInteraction(Date.now());
     setPets((currentPets) => currentPets.filter((pet) => pet.id !== slotId));
     if (selectedPetId === slotId) setSelectedPetId("pet1");
     setFocusedPet(false);
@@ -1333,6 +1335,7 @@ export function PetStage() {
     if (pets.length >= MAX_PETS) return;
     const nextSlotId = PET_SLOT_IDS.find((id) => !pets.some((p) => p.id === id));
     if (!nextSlotId) return;
+    protectLocalInteraction(Date.now());
     setPets((currentPets) => [
       ...currentPets,
       { ...createDefaultPet(nextSlotId, DEFAULT_PET_VARIANT, PET_DEFAULT_NAMES[nextSlotId] ?? nextSlotId), roomId: backgroundId, updatedAt: Date.now() }
@@ -2265,8 +2268,8 @@ export function PetStage() {
             {pets.map((pet, index) => (
               <div className="petSlot" key={pet.id}>
                 <div className="petSlotHeader">
-                  <strong>Tier {index + 1}</strong>
-                  <span>{pet.id === selectedPetId ? "Ausgewählt" : "Aktiv"}</span>
+                  <strong>Pet {index + 1}</strong>
+                  <span>{pet.id === selectedPetId ? "Selected" : "Active"}</span>
                 </div>
                 <div className="petVariantList">
                   {PET_VARIANTS.map((variant) => (
@@ -2281,7 +2284,7 @@ export function PetStage() {
                   ))}
                   {pet.id !== "pet1" ? (
                     <button className="removePetButton" onClick={() => removePetSlot(pet.id)} type="button">
-                      Entfernen
+                      Remove
                     </button>
                   ) : null}
                 </div>
@@ -2289,7 +2292,7 @@ export function PetStage() {
             ))}
             {pets.length < MAX_PETS ? (
               <button className="addPetButton" onClick={addPetSlot} type="button">
-                + Tier hinzufügen
+                + Add Pet
               </button>
             ) : null}
           </section>

@@ -11,6 +11,11 @@ const stateFile = path.join(process.cwd(), ".data", "game-state.json");
 const stateKey = "haustier:game-state";
 let memoryState: SharedGameState = DEFAULT_SHARED_GAME_STATE;
 let redisClientPromise: Promise<RedisClientType> | null = null;
+const MAX_PETS = 4;
+const PET_SLOT_IDS: SharedPet["id"][] = ["pet1", "pet2", "pet3", "pet4"];
+const PET_DEFAULT_X: Record<SharedPet["id"], number> = { pet1: 35, pet2: 50, pet3: 62, pet4: 74 };
+const PET_DEFAULT_ASSET_KEYS: Record<SharedPet["id"], string> = { pet1: "pet", pet2: "pet2", pet3: "pet", pet4: "pet" };
+const PET_DEFAULT_NAMES_SERVER: Record<SharedPet["id"], string> = { pet1: "Momo", pet2: "Pet 2", pet3: "Pet 3", pet4: "Pet 4" };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DECAY_STEP_MS = 4 * 60 * 60 * 1000;
 const DECAY_PER_STEP = 1;
@@ -239,7 +244,7 @@ function getDefaultPet(id: SharedPet["id"], assetKey: string, name: string, now:
     lifecycle: getDefaultLifecycle(now),
     roomId: DEFAULT_SHARED_GAME_STATE.backgroundId,
     state: "sitzen",
-    position: { x: id === "pet1" ? 50 : 58, y: 78 },
+    position: { x: PET_DEFAULT_X[id] ?? 50, y: 78 },
     facing: 1,
     walkDurationMs: 0,
     lastInteractionAt: now,
@@ -253,19 +258,22 @@ function getDefaultPet(id: SharedPet["id"], assetKey: string, name: string, now:
 function normalizePets(state: Partial<SharedGameState>, now: number) {
   const pets = Array.isArray(state.pets) ? state.pets : [];
   if (pets.length > 0) {
-    return pets.slice(0, 2).map((pet, index) => ({
-      ...getDefaultPet(index === 0 ? "pet1" : "pet2", index === 0 ? "pet" : "pet2", index === 0 ? "Momo" : "Pet 2", now),
-      ...pet,
-      stats: { ...DEFAULT_SHARED_GAME_STATE.stats, ...pet.stats },
-      lifecycle: { ...getDefaultLifecycle(now), ...pet.lifecycle },
-      roomId: pet.roomId ?? state.backgroundId ?? DEFAULT_SHARED_GAME_STATE.backgroundId,
-      position: { x: pet.position?.x ?? (index === 0 ? 50 : 58), y: pet.position?.y ?? 78 },
-      lastInteractionAt: pet.lastInteractionAt ?? pet.updatedAt ?? now,
-      lastAutoAt: pet.lastAutoAt ?? now,
-      pendingRoomId: pet.pendingRoomId ?? "",
-      pendingRoomDirection: pet.pendingRoomDirection ?? 0,
-      autoExitAt: pet.autoExitAt ?? 0
-    }));
+    return pets.slice(0, MAX_PETS).map((pet, index) => {
+      const slotId = PET_SLOT_IDS[index] ?? "pet1";
+      return {
+        ...getDefaultPet(slotId, PET_DEFAULT_ASSET_KEYS[slotId] ?? "pet", PET_DEFAULT_NAMES_SERVER[slotId] ?? `Pet ${index + 1}`, now),
+        ...pet,
+        stats: { ...DEFAULT_SHARED_GAME_STATE.stats, ...pet.stats },
+        lifecycle: { ...getDefaultLifecycle(now), ...pet.lifecycle },
+        roomId: pet.roomId ?? state.backgroundId ?? DEFAULT_SHARED_GAME_STATE.backgroundId,
+        position: { x: pet.position?.x ?? PET_DEFAULT_X[slotId], y: pet.position?.y ?? 78 },
+        lastInteractionAt: pet.lastInteractionAt ?? pet.updatedAt ?? now,
+        lastAutoAt: pet.lastAutoAt ?? now,
+        pendingRoomId: pet.pendingRoomId ?? "",
+        pendingRoomDirection: pet.pendingRoomDirection ?? 0,
+        autoExitAt: pet.autoExitAt ?? 0
+      };
+    });
   }
 
   return [{
@@ -290,7 +298,7 @@ function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
   if (!incomingPets) return currentPets;
   const nextPets = [...currentPets];
 
-  incomingPets.slice(0, 2).forEach((incomingPet) => {
+  incomingPets.slice(0, MAX_PETS).forEach((incomingPet) => {
     const index = nextPets.findIndex((pet) => pet.id === incomingPet.id);
     if (index < 0) {
       nextPets.push(incomingPet);
@@ -313,7 +321,7 @@ function mergePets(currentPets: SharedPet[], incomingPets?: SharedPet[]) {
     }
   });
 
-  return nextPets.slice(0, 2).sort((a, b) => a.id.localeCompare(b.id));
+  return nextPets.slice(0, MAX_PETS).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function mergeNotes(currentNotes: SharedGameState["notes"], incomingNotes: SharedGameState["notes"] | undefined, incomingVersion: number, currentVersion: number) {
