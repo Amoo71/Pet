@@ -110,6 +110,10 @@ const BACKGROUND_HEIGHT = 941;
 const BACKGROUND_ASPECT_RATIO = BACKGROUND_WIDTH / BACKGROUND_HEIGHT;
 const DEFAULT_PET_VARIANT = PET_VARIANTS[0]?.id ?? "pet";
 const SECOND_PET_VARIANT = PET_VARIANTS[1]?.id ?? DEFAULT_PET_VARIANT;
+const MAX_PETS = 4;
+const PET_SLOT_IDS: readonly SharedPet["id"][] = ["pet1", "pet2", "pet3", "pet4"];
+const PET_DEFAULT_X: Record<SharedPet["id"], number> = { pet1: 35, pet2: 50, pet3: 62, pet4: 74 };
+const PET_DEFAULT_NAMES: Record<SharedPet["id"], string> = { pet1: "Momo", pet2: "Tier 2", pet3: "Tier 3", pet4: "Tier 4" };
 const MOBILE_MEDIA_QUERY = "(max-width: 760px)";
 
 export function PetStage() {
@@ -1310,7 +1314,7 @@ export function PetStage() {
         return currentPets.map((pet) => pet.id === slotId ? { ...pet, assetKey, updatedAt: Date.now() } : pet);
       }
 
-      return [...currentPets, { ...createDefaultPet(slotId, assetKey, slotId === "pet1" ? "Momo" : "Pet 2"), roomId: backgroundId, updatedAt: Date.now() }].sort((a, b) => a.id.localeCompare(b.id));
+      return [...currentPets, { ...createDefaultPet(slotId, assetKey, PET_DEFAULT_NAMES[slotId] ?? slotId), roomId: backgroundId, updatedAt: Date.now() }].sort((a, b) => a.id.localeCompare(b.id));
     });
     setSelectedPetId(slotId);
     setFocusedPet(false);
@@ -1321,6 +1325,19 @@ export function PetStage() {
     if (slotId === "pet1") return;
     setPets((currentPets) => currentPets.filter((pet) => pet.id !== slotId));
     if (selectedPetId === slotId) setSelectedPetId("pet1");
+    setFocusedPet(false);
+    setActiveInventoryCategory(null);
+  };
+
+  const addPetSlot = () => {
+    if (pets.length >= MAX_PETS) return;
+    const nextSlotId = PET_SLOT_IDS.find((id) => !pets.some((p) => p.id === id));
+    if (!nextSlotId) return;
+    setPets((currentPets) => [
+      ...currentPets,
+      { ...createDefaultPet(nextSlotId, DEFAULT_PET_VARIANT, PET_DEFAULT_NAMES[nextSlotId] ?? nextSlotId), roomId: backgroundId, updatedAt: Date.now() }
+    ].sort((a, b) => a.id.localeCompare(b.id)));
+    setSelectedPetId(nextSlotId);
     setFocusedPet(false);
     setActiveInventoryCategory(null);
   };
@@ -2245,30 +2262,36 @@ export function PetStage() {
 
         {settingsOpen && !focusedPet ? (
           <section className="settingsPanel" aria-label="Pet settings">
-            {(["pet1", "pet2"] as SharedPet["id"][]).map((slotId) => {
-              const slotPet = pets.find((pet) => pet.id === slotId);
-              return (
-                <div className="petSlot" key={slotId}>
-                  <div className="petSlotHeader">
-                    <strong>{slotId === "pet1" ? "Pet 1" : "Pet 2"}</strong>
-                    <span>{slotPet ? (slotId === selectedPetId ? "Selected" : "Active") : "Empty"}</span>
-                  </div>
-                  <div className="petVariantList">
-                    {PET_VARIANTS.map((variant) => (
-                      <button
-                        className={slotPet?.assetKey === variant.id ? "active" : ""}
-                        key={variant.id}
-                        onClick={() => togglePetSlot(slotId, variant.id)}
-                        type="button"
-                      >
-                        {variant.label}
-                      </button>
-                    ))}
-                    {slotId === "pet2" && slotPet ? <button className="removePetButton" onClick={() => removePetSlot(slotId)} type="button">Remove</button> : null}
-                  </div>
+            {pets.map((pet, index) => (
+              <div className="petSlot" key={pet.id}>
+                <div className="petSlotHeader">
+                  <strong>Tier {index + 1}</strong>
+                  <span>{pet.id === selectedPetId ? "Ausgewählt" : "Aktiv"}</span>
                 </div>
-              );
-            })}
+                <div className="petVariantList">
+                  {PET_VARIANTS.map((variant) => (
+                    <button
+                      className={pet.assetKey === variant.id ? "active" : ""}
+                      key={variant.id}
+                      onClick={() => togglePetSlot(pet.id, variant.id)}
+                      type="button"
+                    >
+                      {variant.label}
+                    </button>
+                  ))}
+                  {pet.id !== "pet1" ? (
+                    <button className="removePetButton" onClick={() => removePetSlot(pet.id)} type="button">
+                      Entfernen
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            {pets.length < MAX_PETS ? (
+              <button className="addPetButton" onClick={addPetSlot} type="button">
+                + Tier hinzufügen
+              </button>
+            ) : null}
           </section>
         ) : null}
 
@@ -2341,7 +2364,7 @@ function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, n
     },
     roomId: BACKGROUNDS[0]?.id ?? "Wiese",
     state: "sitzen",
-    position: { x: id === "pet1" ? 50 : 58, y: 78 },
+    position: { x: PET_DEFAULT_X[id] ?? 50, y: 78 },
     facing: 1,
     walkDurationMs: 0,
     lastInteractionAt: now,
@@ -2355,23 +2378,26 @@ function createDefaultPet(id: SharedPet["id"], assetKey: string, name: string, n
 function normalizeRemotePets(remoteState: SharedGameState): SharedPet[] {
   const now = Date.now();
   if (remoteState.pets?.length) {
-    return remoteState.pets.slice(0, 2).map((pet, index) => ({
-      ...createDefaultPet(index === 0 ? "pet1" : "pet2", index === 0 ? DEFAULT_PET_VARIANT : SECOND_PET_VARIANT, index === 0 ? "Momo" : "Pet 2"),
-      ...pet,
-      updatedAt: pet.updatedAt ?? now,
-      stats: { ...initialStats, ...pet.stats },
-      lifecycle: { ...initialLifecycle, ...pet.lifecycle },
-      roomId: pet.roomId ?? remoteState.backgroundId,
-      position: {
-        x: Math.max(2, Math.min(98, pet.position?.x ?? (index === 0 ? 50 : 58))),
-        y: Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position?.y ?? 78))
-      },
-      lastInteractionAt: pet.lastInteractionAt ?? now,
-      lastAutoAt: pet.lastAutoAt ?? now,
-      pendingRoomId: pet.pendingRoomId ?? "",
-      pendingRoomDirection: pet.pendingRoomDirection ?? 0,
-      autoExitAt: pet.autoExitAt ?? 0
-    }));
+    return remoteState.pets.slice(0, MAX_PETS).map((pet, index) => {
+      const slotId = PET_SLOT_IDS[index] ?? "pet1";
+      return {
+        ...createDefaultPet(slotId, index === 0 ? DEFAULT_PET_VARIANT : SECOND_PET_VARIANT, PET_DEFAULT_NAMES[slotId] ?? `Tier ${index + 1}`),
+        ...pet,
+        updatedAt: pet.updatedAt ?? now,
+        stats: { ...initialStats, ...pet.stats },
+        lifecycle: { ...initialLifecycle, ...pet.lifecycle },
+        roomId: pet.roomId ?? remoteState.backgroundId,
+        position: {
+          x: Math.max(2, Math.min(98, pet.position?.x ?? PET_DEFAULT_X[slotId])),
+          y: Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position?.y ?? 78))
+        },
+        lastInteractionAt: pet.lastInteractionAt ?? now,
+        lastAutoAt: pet.lastAutoAt ?? now,
+        pendingRoomId: pet.pendingRoomId ?? "",
+        pendingRoomDirection: pet.pendingRoomDirection ?? 0,
+        autoExitAt: pet.autoExitAt ?? 0
+      };
+    });
   }
 
   return [{

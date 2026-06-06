@@ -21,7 +21,7 @@ export type PetLifecycle = {
 };
 
 export type SharedPet = {
-  id: "pet1" | "pet2";
+  id: "pet1" | "pet2" | "pet3" | "pet4";
   updatedAt: number;
   assetKey: string;
   name: string;
