@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEventHandler } from "react";
 
 type AnimatedSpriteProps = {
@@ -36,76 +36,84 @@ export function AnimatedSprite({
   const [loadedFrames, setLoadedFrames] = useState<Record<string, boolean>>({});
   const [lastVisibleFrame, setLastVisibleFrame] = useState<string | null>(null);
 
+  // Refs so the RAF can read latest values without being a dep (no restart on change)
+  const framesRef = useRef(frames);
+  framesRef.current = frames;
+  const loadedFramesRef = useRef(loadedFrames);
+
   const framesKey = frames.join("|");
   const currentFrame = frames.length > 0 ? frames[frameIndex % frames.length] : null;
   const framesReady = frames.length > 0 && frames.every((frame) => loadedFrames[frame]);
   const firstLoadedFrame = frames.find((frame) => loadedFrames[frame]) ?? null;
   const visibleFrame = currentFrame && loadedFrames[currentFrame] ? currentFrame : firstLoadedFrame;
   const activeFrame = visibleFrame ?? lastVisibleFrame;
+
   const visibleFrames = useMemo(() => {
     if (!activeFrame) return [];
-
     const centerIndex = frames.indexOf(activeFrame);
     if (centerIndex === -1) return [activeFrame];
-
     const previousFrame = frames[(centerIndex - 1 + frames.length) % frames.length];
     const nextFrame = frames[(centerIndex + 1) % frames.length];
     return Array.from(new Set([previousFrame, activeFrame, nextFrame]));
   }, [activeFrame, frames]);
 
+  // Stable callback — updates the ref immediately then schedules the state update
   const markFrameReady = useCallback((frame: string) => {
-    setLoadedFrames((current) => (current[frame] ? current : { ...current, [frame]: true }));
-    setLastVisibleFrame((current) => (currentFrame === frame || current === null ? frame : current));
-  }, [currentFrame]);
+    if (!loadedFramesRef.current[frame]) {
+      const next = { ...loadedFramesRef.current, [frame]: true };
+      loadedFramesRef.current = next;
+      setLoadedFrames(next);
+    }
+  }, []);
 
+  // Preload images whenever frame content changes
   useEffect(() => {
-    if (frames.length === 0) return;
-
+    const f = framesRef.current;
+    if (f.length === 0) return;
     let cancelled = false;
-
-    frames.forEach((frame) => {
+    f.forEach((frame) => {
       const image = new Image();
-      image.onload = () => {
-        if (!cancelled) markFrameReady(frame);
-      };
-      image.onerror = () => {
-        if (!cancelled) markFrameReady(frame);
-      };
+      image.onload = () => { if (!cancelled) markFrameReady(frame); };
+      image.onerror = () => { if (!cancelled) markFrameReady(frame); };
       image.src = frame;
     });
+    return () => { cancelled = true; };
+  // framesKey changes when frame content changes; markFrameReady is stable
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framesKey, markFrameReady]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [frames, framesKey, markFrameReady]);
-  const frameStyle = {
-    ...style,
-    backgroundImage: activeFrame ? `url(${activeFrame})` : undefined
-  };
-
+  // Animation RAF — deps are ONLY framesReady and frameMs.
+  // frames and loadedFrames are read via refs so the RAF never restarts due to
+  // individual frame loads or state transitions (eliminates all flicker).
   useEffect(() => {
-    if (!framesReady || frames.length <= 1) return;
+    if (!framesReady) return;
 
     let animationFrame = 0;
     let lastTick = performance.now();
 
     const tick = (now: number) => {
-      if (now - lastTick >= frameMs) {
+      const f = framesRef.current;
+      if (f.length > 1 && now - lastTick >= frameMs) {
         setFrameIndex((current) => {
-          const nextIndex = (current + 1) % frames.length;
-          if (loadedFrames[frames[nextIndex]]) setLastVisibleFrame(frames[nextIndex]);
+          const nextIndex = (current + 1) % f.length;
+          if (loadedFramesRef.current[f[nextIndex]]) {
+            setLastVisibleFrame(f[nextIndex]);
+          }
           return nextIndex;
         });
         lastTick = now;
       }
-
       animationFrame = requestAnimationFrame(tick);
     };
 
     animationFrame = requestAnimationFrame(tick);
-
     return () => cancelAnimationFrame(animationFrame);
-  }, [frameMs, frames, frames.length, framesReady, loadedFrames]);
+  }, [framesReady, frameMs]);
+
+  const frameStyle = {
+    ...style,
+    backgroundImage: activeFrame ? `url(${activeFrame})` : undefined
+  };
 
   if (renderMode === "background") {
     return (

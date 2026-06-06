@@ -975,11 +975,12 @@ export function PetStage() {
     setFacing(target.x < currentPos.x ? -1 : 1);
     walkOriginRef.current = currentPos;
     setPetPosition(currentPos);
-    setPetState("stehen");
     setWalkDurationMs(0);
 
     const duration = getWalkDuration(currentPos, target);
-    const delay = petState === "sitzen" ? 180 : 40;
+    // Skip the "stehen" pause when already walking — redirect immediately.
+    // Only pause briefly from sitzen so the stand-up looks intentional.
+    const delay = petState === "sitzen" ? 120 : 0;
     const timer = setTimeout(() => {
       walkOriginRef.current = currentPos;
       walkStartTimeRef.current = Date.now();
