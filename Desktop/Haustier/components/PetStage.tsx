@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, WheelEvent } from "react";
 import NextImage from "next/image";
-import { AnimatedSprite } from "@/components/AnimatedSprite";
-import { BACKGROUNDS, PET_STATES, PET_VARIANTS, type PetStateId } from "@/lib/gameConfig";
+import { PhaserGame } from "@/components/PhaserGame";
+import { BACKGROUNDS, PET_VARIANTS, type PetStateId } from "@/lib/gameConfig";
+import type { PhaserState } from "@/lib/phaser/PetScene";
 import type { SharedGameState, SharedNote, SharedPet, SharedPoop } from "@/lib/sharedGameState";
 
 type PetStats = {
@@ -116,6 +117,18 @@ const PET_DEFAULT_X: Record<SharedPet["id"], number> = { pet1: 35, pet2: 50, pet
 const PET_DEFAULT_NAMES: Record<SharedPet["id"], string> = { pet1: "Momo", pet2: "Tier 2", pet3: "Tier 3", pet4: "Tier 4" };
 const MOBILE_MEDIA_QUERY = "(max-width: 760px)";
 
+// Static frame data maps for Phaser — computed once at module load
+const PET_FRAMES_BY_VARIANT_STATE: Record<string, Record<string, readonly string[]>> = {};
+const PET_FRAME_MS_BY_VARIANT_STATE: Record<string, Record<string, number>> = {};
+PET_VARIANTS.forEach((variant) => {
+  PET_FRAMES_BY_VARIANT_STATE[variant.id] = {};
+  PET_FRAME_MS_BY_VARIANT_STATE[variant.id] = {};
+  Object.entries(variant.states).forEach(([stateId, stateConfig]) => {
+    PET_FRAMES_BY_VARIANT_STATE[variant.id][stateId] = stateConfig.frames;
+    PET_FRAME_MS_BY_VARIANT_STATE[variant.id][stateId] = stateConfig.frameMs;
+  });
+});
+
 export function PetStage() {
   const [backgroundId, setBackgroundId] = useState(BACKGROUNDS[0]?.id ?? "wiese");
   const [zoom, setZoom] = useState(1);
@@ -218,6 +231,36 @@ export function PetStage() {
   const strokeMoodCooldownRef = useRef(0);
   const petInteractionRef = useRef<number>(0);
   const schedulePoopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const phaserStateRef = useRef<PhaserState>({
+    backgroundFrames: [],
+    backgroundFrameMs: 420,
+    petsInRoom: [],
+    selectedPetId: "pet1",
+    petZoomMode: "normal",
+    isStroking: false,
+    strokeFrameIndex: STROKE_FRAME_INDEX,
+    petFramesByVariantState: PET_FRAMES_BY_VARIANT_STATE,
+    petFrameMsByVariantState: PET_FRAME_MS_BY_VARIANT_STATE,
+    walkTargetMarker: null,
+    ballVisible: false,
+    ballImageSrc: BALL_IMAGE,
+    ballPosition: BALL_CENTER,
+    ballRotation: 0,
+    foodVisible: false,
+    foodImageSrc: FOOD_IMAGE,
+    foodPosition: BALL_CENTER,
+    bedVisible: false,
+    bedImageSrc: BED_IMAGE,
+    bedPosition: BALL_CENTER,
+    noteDraftVisible: false,
+    noteDraftTemplate: "note1",
+    noteDraftPosition: { x: 50, y: 34 },
+    poops: [],
+    notes: [],
+    zoom: 1,
+    scenePan: { x: 0, y: 0 },
+    sleepActive: false,
+  });
 
   const updateSelectedPet = (updater: (pet: SharedPet) => SharedPet) => {
     setPets((currentPets) => currentPets.map((pet) => pet.id === selectedPetId ? { ...updater(pet), updatedAt: Date.now() } : pet));
@@ -273,13 +316,6 @@ export function PetStage() {
     [backgroundId]
   );
 
-  const backgroundFrame = activeBackground?.frames[0];
-  const backgroundStyle = {
-    backgroundImage: backgroundFrame ? `url("${encodeURI(backgroundFrame)}")` : undefined
-  } as CSSProperties;
-  const selectedPetVariant = PET_VARIANTS.find((variant) => variant.id === selectedPet.assetKey) ?? PET_VARIANTS[0];
-  const activePetState = selectedPetVariant?.states[petState] ?? PET_STATES[petState];
-  const activePetFrames = activePetState.frames.length > 0 ? activePetState.frames : PET_STATES.stehen.frames;
   const stageStyle = {
     "--scene-zoom": zoom,
     "--scene-pan-x": `${scenePan.x}px`,
@@ -291,28 +327,6 @@ export function PetStage() {
     "--world-natural-height": `${BACKGROUND_HEIGHT}px`,
     "--scene-origin-x": "50%",
     "--scene-origin-y": "50%"
-  } as CSSProperties;
-  const ballStyle = {
-    "--ball-x": `${ballPosition.x}%`,
-    "--ball-y": `${ballPosition.y}%`,
-    "--ball-rotation": `${ballRotation}deg`,
-    "--ball-move-duration": `${ballTransitionMs}ms`,
-    "--ball-image": `url("${encodeURI(ballImageSrc)}")`
-  } as CSSProperties;
-  const foodStyle = {
-    "--item-x": `${foodPosition.x}%`,
-    "--item-y": `${foodPosition.y}%`,
-    "--item-image": `url("${encodeURI(foodImageSrc)}")`
-  } as CSSProperties;
-  const bedStyle = {
-    "--item-x": `${bedPosition.x}%`,
-    "--item-y": `${bedPosition.y}%`,
-    "--item-image": `url("${encodeURI(bedImageSrc)}")`
-  } as CSSProperties;
-  const noteDraftStyle = {
-    "--item-x": `${noteDraftPosition.x}%`,
-    "--item-y": `${noteDraftPosition.y}%`,
-    "--item-image": `url("${encodeURI(NOTE_IMAGES[noteDraftTemplate])}")`
   } as CSSProperties;
   const isKitchen = isKitchenRoom(backgroundId);
   const inventoryCategories: InventoryCategory[] = ["play", "feed", "sleep", ...(isKitchen ? ["notes" as const] : [])];
@@ -910,7 +924,9 @@ export function PetStage() {
       return;
     }
 
-    if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote")) return;
+    // UI panels stop propagation themselves; Phaser canvas is pointer-events:none so
+    // ball/items/pets/poops/notes are no longer in the DOM — use coordinate hit-testing below.
+    if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay")) return;
     if (petZoomMode === "close") return;
     if (focusedPet) {
       exitFocus();
@@ -918,6 +934,23 @@ export function PetStage() {
     }
 
     const { x: worldX, y: worldY } = getScenePoint(event.clientX, event.clientY);
+
+    // Hit-test ball → suppress walk
+    if (ballVisible && ballRoomId === backgroundId) {
+      if (Math.hypot(worldX - ballPosition.x, worldY - ballPosition.y) < 5) return;
+    }
+
+    // Hit-test poops → clean up
+    const hitPoop = poops.find((p) => p.roomId === backgroundId && Math.hypot(worldX - p.position.x, worldY - p.position.y) < 3.5);
+    if (hitPoop) { removePoopById(hitPoop.id); return; }
+
+    // Hit-test placed notes → open viewer
+    const hitNote = notes.find((n) => n.roomId === backgroundId && Math.hypot(worldX - n.position.x, worldY - n.position.y) < 6);
+    if (hitNote) { setViewingNoteId(hitNote.id); return; }
+
+    // Hit-test pets → handle pet click
+    const hitPet = petsInRoom.find((pet) => !pet.lifecycle.deadAt && hitTestPet(worldX, worldY, pet));
+    if (hitPet) { handlePetClick(hitPet, event); return; }
 
     if (selectedPet.roomId === backgroundId) {
       const clickedSky = SKY_BACKGROUNDS.has(activeBackground.id) && worldY < MOVEMENT_AREA.minY;
@@ -1126,8 +1159,27 @@ export function PetStage() {
 
   const startStageDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (isDead) return;
-    if (petZoomMode === "close") return;
-    if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay, .ball, .worldItem, .worldNote, .petSprite")) return;
+    // UI overlays still exist as React DOM elements; they stopPropagation already
+    if ((event.target as HTMLElement).closest(".statusPanel, .focusPanel, .itemTray, .noteEditorOverlay, .noteViewerOverlay")) return;
+
+    // In close-zoom stroke mode route pointer to stroke handler
+    if (petZoomMode === "close") {
+      startPetStroke(event);
+      return;
+    }
+
+    // Ball drag via coordinate hit-testing (ball is now a Phaser sprite, not a DOM element)
+    const { x: worldX, y: worldY } = getScenePoint(event.clientX, event.clientY);
+    if (ballVisible && ballRoomId === backgroundId) {
+      if (Math.hypot(worldX - ballPosition.x, worldY - ballPosition.y) < 5) {
+        startBallDrag(event);
+        return;
+      }
+    }
+
+    // Suppress camera drag when pointer is on a pet sprite
+    if (petsInRoom.some((pet) => hitTestPet(worldX, worldY, pet))) return;
+
     if (cameraFollowsPet) {
       setCameraFollowsPet(false);
       if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
@@ -1159,6 +1211,11 @@ export function PetStage() {
   };
 
   const dragStage = (event: PointerEvent<HTMLDivElement>) => {
+    if (petZoomModeRef.current === "close") {
+      movePetStroke(event);
+      return;
+    }
+
     if (stagePointers.current.has(event.pointerId)) {
       stagePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
@@ -1190,6 +1247,13 @@ export function PetStage() {
   };
 
   const finishStageDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (petZoomModeRef.current === "close") {
+      endPetStroke();
+      stagePointers.current.delete(event.pointerId);
+      if (stagePointers.current.size < 2) pinchGesture.current = null;
+      return;
+    }
+
     const drag = stageDrag.current;
     stageDrag.current = null;
     stagePointers.current.delete(event.pointerId);
@@ -1983,6 +2047,51 @@ export function PetStage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ballDragging, ballVisible]);
 
+  // eslint-disable-next-line react-hooks/refs -- intentional: sync React state to Phaser each render
+  phaserStateRef.current = {
+    backgroundFrames: activeBackground?.frames ?? [],
+    backgroundFrameMs: activeBackground?.frameMs ?? 420,
+    petsInRoom: petsInRoom.map((pet) => ({
+      id: pet.id,
+      assetKey: pet.assetKey,
+      state: pet.state,
+      position: pet.position,
+      facing: pet.facing,
+      walkDurationMs: pet.walkDurationMs,
+      isSelected: pet.id === selectedPetId,
+      isDead: pet.lifecycle.deadAt > 0,
+    })),
+    selectedPetId,
+    petZoomMode,
+    isStroking,
+    strokeFrameIndex: STROKE_FRAME_INDEX,
+    petFramesByVariantState: PET_FRAMES_BY_VARIANT_STATE,
+    petFrameMsByVariantState: PET_FRAME_MS_BY_VARIANT_STATE,
+    walkTargetMarker,
+    ballVisible: ballVisible && ballRoomId === backgroundId,
+    ballImageSrc,
+    ballPosition,
+    ballRotation,
+    foodVisible: foodVisible && foodRoomId === backgroundId,
+    foodImageSrc,
+    foodPosition,
+    bedVisible: bedVisible && bedRoomId === backgroundId,
+    bedImageSrc,
+    bedPosition,
+    noteDraftVisible: noteDraftVisible && !noteEditorOpen,
+    noteDraftTemplate,
+    noteDraftPosition,
+    poops: poops
+      .filter((p) => p.roomId === backgroundId)
+      .map((p) => ({ id: p.id, position: p.position })),
+    notes: notes
+      .filter((n) => n.roomId === backgroundId)
+      .map((n) => ({ id: n.id, position: n.position, template: n.template ?? "note1" })),
+    zoom,
+    scenePan,
+    sleepActive: petState === "sleep" && selectedPet.roomId === backgroundId && !isDead,
+  };
+
   return (
     <main className="appShell">
       {hearts.map((heart) => (
@@ -2007,138 +2116,7 @@ export function PetStage() {
           ref={stageRef}
           style={stageStyle}
         >
-          <div className="sceneWorld">
-            <div className="backgroundFallback" aria-hidden="true" />
-            <div aria-label={activeBackground?.label ?? "Background"} className="backgroundSprite" role="img" style={backgroundStyle} />
-
-            {petsInRoom.map((pet) => {
-              const variant = PET_VARIANTS.find((entry) => entry.id === pet.assetKey) ?? PET_VARIANTS[0];
-              const state = variant?.states[pet.state] ?? PET_STATES[pet.state];
-              const allFrames = state.frames.length > 0 ? state.frames : PET_STATES.stehen.frames;
-              const isStrokeTarget = petZoomMode === "close" && pet.id === selectedPetId;
-              let forcedFrame: string | undefined;
-              if (isStrokeTarget) {
-                const idx = Math.min(STROKE_FRAME_INDEX[pet.assetKey] ?? 0, allFrames.length - 1);
-                forcedFrame = isStroking ? allFrames[idx] : allFrames[0];
-              }
-              const safeX = Math.max(2, Math.min(98, pet.position.x));
-              const safeY = Math.max(MOVEMENT_AREA.minY, Math.min(MOVEMENT_AREA.maxY, pet.position.y));
-              const style = {
-                "--pet-x": `${safeX}%`,
-                "--pet-y": `${safeY}%`,
-                "--pet-facing": pet.facing,
-                "--pet-walk-duration": `${pet.walkDurationMs}ms`
-              } as CSSProperties;
-              return (
-                <AnimatedSprite
-                  className={`petSprite${pet.id === selectedPetId ? " selected" : ""}${pet.state === "springen" ? " jumping" : ""}${pet.state === "sleep" ? " sleeping" : ""}${isStrokeTarget ? " strokeTarget" : ""}`}
-                  forcedFrame={forcedFrame}
-                  frameMs={state.frameMs}
-                  frames={allFrames}
-                  key={pet.id}
-                  label={`${pet.name} ${state.label}`}
-                  onClick={isDead || pet.lifecycle.deadAt > 0 ? undefined : (event) => handlePetClick(pet, event)}
-                  onPointerDown={isStrokeTarget ? startPetStroke : undefined}
-                  onPointerMove={isStrokeTarget ? movePetStroke : undefined}
-                  onPointerUp={isStrokeTarget ? endPetStroke : undefined}
-                  style={style}
-                />
-              );
-            })}
-
-            {walkTargetMarker && selectedPet.roomId === backgroundId ? (
-              <div
-                aria-hidden="true"
-                className="walkTargetMarker"
-                style={{ "--target-x": `${walkTargetMarker.x}%`, "--target-y": `${walkTargetMarker.y}%` } as CSSProperties}
-              />
-            ) : null}
-
-            {ballVisible && ballRoomId === backgroundId ? (
-              <div
-                aria-label="Ball"
-                className={`ball${ballDragging ? " dragging" : ""}${ballImageReady ? " hasImage" : ""}`}
-                onPointerDown={startBallDrag}
-                role="button"
-                style={ballStyle}
-                tabIndex={0}
-              />
-            ) : null}
-
-            {foodVisible && foodRoomId === backgroundId ? (
-              <div
-                aria-label="Steak"
-                className={`worldItem foodItem${foodDragging ? " dragging" : ""}${foodImageReady ? " hasImage" : ""}`}
-                role="button"
-                style={foodStyle}
-                tabIndex={0}
-              >
-                {foodImageReady ? <NextImage alt="" className="worldItemImage" draggable={false} fill sizes="132px" src={foodImageSrc} /> : null}
-              </div>
-            ) : null}
-
-            {bedVisible && bedRoomId === backgroundId ? (
-              <div
-                aria-label="Bed"
-                className={`worldItem bedItem${bedDragging ? " dragging" : ""}${bedImageReady ? " hasImage" : ""}`}
-                role="button"
-                style={bedStyle}
-                tabIndex={0}
-              >
-                {bedImageReady ? <NextImage alt="" className="worldItemImage" draggable={false} fill sizes="340px" src={bedImageSrc} /> : null}
-              </div>
-            ) : null}
-
-            {noteDraftVisible && !noteEditorOpen ? (
-              <div
-                aria-label="Note draft"
-                className={`worldItem noteItem${noteDragging ? " dragging" : ""}${noteImagesReady[noteDraftTemplate] ? " hasImage" : ""}`}
-                role="button"
-                style={noteDraftStyle}
-              >
-                {noteImagesReady[noteDraftTemplate] ? <NextImage alt="" className="worldItemImage" draggable={false} fill sizes="180px" src={NOTE_IMAGES[noteDraftTemplate]} /> : null}
-              </div>
-            ) : null}
-
-            {poops.filter((p) => p.roomId === backgroundId).map((poop) => (
-              <button
-                aria-label="Clean up"
-                className="worldPoop"
-                key={poop.id}
-                onClick={(event) => { event.stopPropagation(); removePoopById(poop.id); }}
-                onPointerDown={(event) => event.stopPropagation()}
-                style={{ "--poop-x": `${poop.position.x}%`, "--poop-y": `${poop.position.y}%` } as CSSProperties}
-                type="button"
-              >
-                <NextImage alt="" draggable={false} fill sizes="72px" src={POOP_IMAGE} />
-              </button>
-            ))}
-
-            {notes.filter((note) => note.roomId === backgroundId).map((note) => (
-              <button
-                aria-label="Open note"
-                className="worldNote"
-                key={note.id}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setViewingNoteId(note.id);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                style={{ "--note-x": `${note.position.x}%`, "--note-y": `${note.position.y}%` } as CSSProperties}
-                type="button"
-              >
-                <span
-                  className={`worldNotePaper ${note.template ?? "note1"}${noteImagesReady[note.template ?? "note1"] ? " hasImage" : ""}`}
-                  style={noteImagesReady[note.template ?? "note1"] ? { backgroundImage: `url(${NOTE_IMAGES[note.template ?? "note1"]})` } : undefined}
-                >
-                  {note.imageData ? <span className="worldNoteDrawing" style={{ backgroundImage: `url(${note.imageData})` }} /> : null}
-                  {note.text ? <span className="worldNoteText">{note.text}</span> : null}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {petState === "sleep" && selectedPet.roomId === backgroundId && !isDead ? <div className="sleepOverlay" aria-hidden="true" /> : null}
+          <PhaserGame stateRef={phaserStateRef} />
 
           {isDead ? (
             <div className="deathOverlay" role="dialog" aria-label="Pet died">
@@ -2616,4 +2594,17 @@ function clampScenePanLoose(point: Point, zoom: number) {
     x: clampPosition(point.x, -maxX, maxX),
     y: clampPosition(point.y, -maxY, maxY)
   };
+}
+
+// Hit-test a world percentage point against a pet's bounding box.
+// Pet is anchored bottom-center; height ~26% of world, width ~14%.
+function hitTestPet(worldX: number, worldY: number, pet: SharedPet): boolean {
+  const halfW = 7;
+  const petH = 26;
+  return (
+    worldX >= pet.position.x - halfW &&
+    worldX <= pet.position.x + halfW &&
+    worldY >= pet.position.y - petH &&
+    worldY <= pet.position.y
+  );
 }
