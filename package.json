@@ -1,0 +1,13 @@
+{
+  "name": "tendies-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live-Wallpaper-Studio für das iOS PosterBoard – erstellt .tendies-Dateien direkt im Browser (PWA).",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node tests/core.test.mjs test-out",
+    "test:e2e": "node tests/e2e.cjs"
+  },
+  "license": "MIT"
+}
