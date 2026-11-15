@@ -116,7 +116,20 @@ async function renderLayerBlob(layer, scale = 3) {
   if (layer.kind === 'text' && layer.text?.fontAsset) await ensureFont(layer.text.fontAsset);
   if (layer.kind === 'text') await document.fonts?.ready;
   if (layer.kind === 'emitter') {
-    if (layer.emitter?.particleAsset) return getBlob(layer.emitter.particleAsset);
+    if (layer.emitter?.particleAsset) {
+      // particle size is defined for a 64 px picture (preview and export): fit the picture into 64 px
+      const b = await getBlob(layer.emitter.particleAsset);
+      try {
+        const img = await createImageBitmap(b);
+        const c = makeCanvas(64, 64);
+        const k = 64 / Math.max(img.width, img.height);
+        c.getContext('2d').drawImage(img, (64 - img.width * k) / 2, (64 - img.height * k) / 2, img.width * k, img.height * k);
+        img.close?.();
+        return canvasToBlob(c);
+      } catch {
+        return b;
+      }
+    }
     return canvasToBlob(renderParticleCanvas(layer.emitter?.particle));
   }
   if (layer.kind === 'glass') return canvasToBlob(renderGlassCanvas(layer, scale, null));

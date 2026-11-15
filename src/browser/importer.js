@@ -34,6 +34,119 @@ function parseTransform(s) {
   return out;
 }
 
+// ---------------------------------------------------------------- colours, gradients, text, particles
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const hex2 = (v) => Math.round(clamp01(v) * 255).toString(16).padStart(2, '0');
+/** "r g b [a]" (extended sRGB floats) as attribute, or <name value="r g b" opacity="a"/> child */
+function readColor(el, attrName) {
+  let v = el.getAttribute(attrName);
+  let a = 1;
+  if (v == null) {
+    const n = el.querySelector(`:scope > ${attrName}`);
+    if (!n) return null;
+    v = n.getAttribute('value');
+    if (n.hasAttribute('opacity')) a = Number(n.getAttribute('opacity'));
+  }
+  const c = nums(v);
+  if (c.length < 3 || c.some((x) => !Number.isFinite(x))) return null;
+  if (c.length >= 4) a *= c[3];
+  return { hex: `#${hex2(c[0])}${hex2(c[1])}${hex2(c[2])}`, a: clamp01(a) };
+}
+const colorHex = (v) => {
+  const c = nums(v);
+  return c.length >= 3 && c.every(Number.isFinite) ? `#${hex2(c[0])}${hex2(c[1])}${hex2(c[2])}` : null;
+};
+
+function readGradient(el) {
+  const colors = [...el.querySelectorAll(':scope > colors > *')].map((n) => colorHex(n.getAttribute('value'))).filter(Boolean);
+  if (colors.length < 2) return null;
+  let locs = [...el.querySelectorAll(':scope > locations > *')].map((n) => Number(n.getAttribute('value')));
+  if (locs.length !== colors.length) locs = colors.map((_, i) => i / (colors.length - 1));
+  const [sx = 0.5, sy = 0] = el.hasAttribute('startPoint') ? nums(el.getAttribute('startPoint')) : [];
+  const [ex = 0.5, ey = 1] = el.hasAttribute('endPoint') ? nums(el.getAttribute('endPoint')) : [];
+  const type = el.getAttribute('type') === 'radial' ? 'radial' : 'linear';
+  // unit points with y down → editor angle (180 = top → bottom)
+  const angle = Math.round(((Math.atan2(ex - sx, -(ey - sy)) * 180) / Math.PI + 360) % 360);
+  return { type, angle, stops: colors.map((c, i) => ({ c, p: clamp01(locs[i]) })) };
+}
+
+function readText(el, scale) {
+  const str = el.getAttribute('string') ?? el.querySelector(':scope > string')?.getAttribute('value') ?? el.querySelector(':scope > string')?.textContent;
+  if (!str) return null;
+  const fg = readColor(el, 'foregroundColor');
+  const align = { left: 'left', right: 'right', center: 'center', natural: 'left', justified: 'left' }[el.getAttribute('alignmentMode')] || 'center';
+  return { content: String(str), size: Math.round((Number(el.getAttribute('fontSize')) || 36) * scale), color: fg?.hex || '#ffffff', align, shadow: 0 };
+}
+
+/** CAEmitterLayer → editor particles (first cell): position, direction, gravity and size in screen space */
+async function readEmitter(el, own, resolve, files, caDir, H) {
+  const cell = el.querySelector(':scope > emitterCells > CAEmitterCell');
+  if (!cell) return null;
+  const n = (k, d = 0) => (cell.hasAttribute(k) ? Number(cell.getAttribute(k)) : d);
+  const [epx = 0, epy = 0] = nums(el.getAttribute('emitterPosition'));
+  const [esw = 0, esh = 0] = nums(el.getAttribute('emitterSize'));
+  const lin = (x, y) => [own[0] * x + own[2] * y, own[1] * x + own[3] * y];
+  const [wx, wy] = mApply(own, epx, epy);
+  const sc = Math.hypot(own[0], own[1]) || 1;
+  // a direction in emitter space → editor degrees (screen, y down)
+  const dirDeg = (ang) => {
+    const [dx, dy] = lin(Math.cos(ang), Math.sin(ang));
+    return (Math.atan2(-dy, dx) * 180) / Math.PI;
+  };
+  const [ax, ay] = lin(n('xAcceleration'), n('yAcceleration'));
+  const src = cell.querySelector(':scope > contents > CGImage, :scope > contents[src]')?.getAttribute('src') || cell.querySelector('CGImage')?.getAttribute('src');
+  let particleAsset = null;
+  let imgPx = 64;
+  if (src) {
+    particleAsset = await resolve(src);
+    try {
+      const bytes = files.get(caDir + src) || files.get(caDir + safeDecode(src));
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      imgPx = Math.max(bmp.width, bmp.height) || 64;
+      bmp.close?.();
+    } catch {
+      /* keep 64 */
+    }
+  }
+  const cs = n('contentsScale', 1) || 1;
+  const shape = el.getAttribute('emitterShape') || 'point';
+  const lineShape = shape === 'line';
+  const wPt = Math.max(8, Math.abs(esw) * sc);
+  const hPt = lineShape ? 8 : Math.max(8, Math.abs(esh) * sc);
+  const fg = colorHex(cell.getAttribute('color') || '1 1 1') || '#ffffff';
+  const longitude = dirDeg(n('emissionLongitude'));
+  return {
+    x: wx,
+    y: H - wy,
+    w: wPt,
+    h: hPt,
+    emitter: {
+      preset: 'custom',
+      name: 'Imported',
+      birthRate: n('birthRate', 1) * (Number(el.getAttribute('birthRate')) || 1),
+      lifetime: n('lifetime', 1) * (Number(el.getAttribute('lifetime')) || 1),
+      velocity: n('velocity') * sc * (Number(el.getAttribute('velocity')) || 1),
+      velocityRange: n('velocityRange') * sc,
+      emissionLongitude: Math.round(longitude * 10) / 10,
+      emissionRange: (Math.abs(n('emissionRange')) * 180) / Math.PI,
+      xAcceleration: ax,
+      yAcceleration: -ay,
+      scale: n('scale', 1),
+      scaleRange: n('scaleRange'),
+      spin: n('spin'),
+      spinRange: n('spinRange'),
+      alphaSpeed: n('alphaSpeed'),
+      color: fg,
+      size: (imgPx / cs) * sc, // pt size of the particle image at scale 1
+      particle: 'dot',
+      particleAsset,
+      shape: lineShape ? 'line' : 'rectangle',
+      additive: el.getAttribute('renderMode') === 'additive',
+    },
+  };
+}
+
 // ---------------------------------------------------------------- animations
 
 const ANIM_KEYS = new Set(['position', 'position.x', 'position.y', 'transform.translation.x', 'transform.translation.y', 'transform.rotation.z', 'transform.rotation', 'transform.scale', 'transform.scale.xy', 'opacity']);
@@ -76,7 +189,7 @@ function readAnimations(link) {
       easing: a.getAttribute('timingFunction') || 'linear',
       delay: Math.max(0, Number(a.getAttribute('timeOffset')) || 0),
     };
-    const make = (prop, vs) => ({ id: uid('A'), preset: 'custom', prop, amount: 0, keys: vs.map((v, i) => ({ t: Math.max(0, Math.min(1, keyTimes[i])), v: Math.round(v * 1000) / 1000 })), ...timing, enabled: true });
+    const make = (prop, vs) => ({ id: uid('A'), preset: 'custom', prop, amount: 0, absPos: !kp.startsWith('transform.'), keys: vs.map((v, i) => ({ t: Math.max(0, Math.min(1, keyTimes[i])), v: Math.round(v * 1000) / 1000 })), ...timing, enabled: true });
     const m = link.pm || I2;
     const sd = (dx, dy) => [m[0] * dx + m[2] * dy, -(m[1] * dx + m[3] * dy)];
     if (kp === 'position' || kp === 'position.x' || kp === 'position.y' || kp.startsWith('transform.translation')) {
@@ -231,8 +344,33 @@ export async function importTendies(buf, storeAsset) {
           const ownUniform = Math.abs(Math.abs(tr.sx) - Math.abs(tr.sy)) < 1e-6 && tr.sx !== 0;
           const link = { name, opAttr, el: child, pm: space, px: ppx, py: ppy, ts: tr.sx || 1, tr: tr.rot };
           const nextChain = [...chain, link];
+          const common = (l) => {
+            proj.layers.push(l);
+            layerGeo.set(l, { pm: space, px: ppx, py: ppy, s0: l.scale || 1, r0: l.rotation || 0, ts: tr.sx || 1, tr: tr.rot });
+            for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer: l, opAttr: c.opAttr, pm: c.pm });
+            const id = child.getAttribute('id');
+            if (id && !byId.has(id)) (byId.set(id, l), idGeo.set(id, { pm: space, px: ppx, py: ppy, ts: tr.sx || 1, tr: tr.rot }));
+            return l;
+          };
+          const cumOp = nextChain.reduce((s2, c) => s2 * c.opAttr, op);
+          const geo = { plane: pl, x: cx, y: H - cy, w: (w || 0) * wsx, h: (h || 0) * wsy, rotation: Math.round(-wrot * 100) / 100, hidden: child.getAttribute('hidden') === '1', cornerRadius: (Number(child.getAttribute('cornerRadius')) || 0) * wsx };
+          // solid colour fill (backgroundColor) – drawn behind the layer's own picture / sublayers
+          const bg = readColor(child, 'backgroundColor');
+          if (bg && bg.a > 0.004 && w > 0 && h > 0 && tag !== 'CAEmitterLayer' && tag !== 'CATransformLayer') {
+            common(newLayer('color', proj, { ...geo, name: `${name || 'Color'}${child.querySelector(':scope > contents') ? ' fill' : ''}`, color: bg.hex, opacity: cumOp * bg.a }));
+          }
+          if (tag === 'CAGradientLayer') {
+            const g = readGradient(child);
+            if (g) common(newLayer('gradient', proj, { ...geo, name: name || 'Gradient', gradient: g, opacity: cumOp }));
+          }
+          if (tag === 'CATextLayer') {
+            const t = readText(child, wsx);
+            if (t) common(newLayer('text', proj, { ...geo, name: name || 'Text', text: { ...newLayer('text', proj).text, ...t }, opacity: cumOp }));
+          }
           if (tag === 'CAEmitterLayer') {
-            warnings.push(`Particle layer “${name}” was skipped.`);
+            const em = await readEmitter(child, own, resolve, files, caDir, H);
+            if (em) common(newLayer('emitter', proj, { ...em, plane: pl, name: name || 'Particles', opacity: cumOp, hidden: geo.hidden }));
+            else warnings.push(`Particle layer “${name}” could not be read.`);
             continue;
           }
           if (tag === 'CABackdropLayer') {
@@ -314,6 +452,12 @@ export async function importTendies(buf, storeAsset) {
           if (nextChain.length < 12) await walk(child, childSpace(child, own), op, nextChain, pl);
         }
       };
+      // a colour on the root layer fills the whole document
+      const rootBg = readColor(root, 'backgroundColor');
+      if (rootBg && rootBg.a > 0.004) {
+        const [, , rw2 = proj._w, rh2 = proj._h] = nums(root.getAttribute('bounds'));
+        proj.layers.push(newLayer('color', proj, { plane: planeOf(caName, wp), name: 'Background colour', x: rw2 / 2, y: rh2 / 2, w: rw2, h: rh2, color: rootBg.hex, opacity: rootBg.a }));
+      }
       // the root's sublayers: root bounds space = document space
       await walk(root, childSpace(root, I2), 1, [], planeOf(caName, wp));
       // a position change (in the layer's parent space) → screen delta
@@ -343,6 +487,15 @@ export async function importTendies(buf, storeAsset) {
             const baseX = layer.x, baseY = layer.y;
             if (Math.abs(dx) > 1e-6) tgt.x = baseX + dx;
             if (Math.abs(dy) > 1e-6) tgt.y = baseY + dy;
+            // an animation of the absolute position wins over the state on device: keep its result unchanged
+            if (key === 'Locked') {
+              const ls = Math.abs(layer.scale || 1) || 1;
+              for (const a of layer.anims || []) {
+                if (!a.absPos) continue;
+                if (a.prop === 'x' && Math.abs(dx) > 1e-6) for (const k of a.keys) k.v -= dx / ls;
+                if (a.prop === 'y' && Math.abs(dy) > 1e-6) for (const k of a.keys) k.v -= dy / ls;
+              }
+            }
             continue;
           }
           const g0 = layerGeo.get(layer);
@@ -446,6 +599,10 @@ export async function importTendies(buf, storeAsset) {
           l.w *= s;
           l.h *= s;
           l.parallax = Math.round((l.parallax || 0) * s);
+          if (l.cornerRadius) l.cornerRadius *= s;
+          if (l.text) l.text.size = Math.round(l.text.size * s);
+          if (l.emitter) for (const k of ['size', 'velocity', 'velocityRange', 'xAcceleration', 'yAcceleration']) l.emitter[k] = (l.emitter[k] || 0) * s;
+          for (const a of l.anims || []) if (a.prop === 'x' || a.prop === 'y') for (const k of a.keys) k.v *= s;
           for (const v of Object.values(l.states)) {
             if ('x' in v) v.x = mx(v.x);
             if ('y' in v) v.y = my(v.y);
