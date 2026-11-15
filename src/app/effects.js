@@ -214,13 +214,14 @@ function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
 
 /**
  * Duo 3D tilt – the iPhone Duo fold look, driven by the gyro.
- * Model (Mac-Duo's DepthGeometry): the picture is a plate that turns back in real
- * perspective, the far edge recedes into black, and blur + dimming grow towards it.
- *   * one picture layer, pivot at the centre, gyro rotation.y ±tilt (rotation.x a third)
- *     on a CATransformLayer around it; the scene perspective gives the trapezoid;
- *   * two "far edge" copies (blur + dim per the formulas above) fade in with the tilt,
- *     one for each direction, so the side turning away blurs and darkens;
- *   * black behind, like the Duo's panel edge.
+ * Model (Mac-Duo's DepthGeometry): the whole picture is one plate hinged at the NEAR edge
+ * that turns back in real perspective – the far side recedes into black, and blur +
+ * dimming grow towards it. A plate can only have one hinge, so there are two:
+ *   * "Duo R" – hinged on the left edge, turns its right side away (tilt right, +x),
+ *   * "Duo L" – hinged on the right edge, turns its left side away (tilt left, −x).
+ * Steep gyro fades switch between them around level (opacity = k·tilt, clamped), so at
+ * rest the picture is flat and full-screen. Each plate has a far-edge copy whose opacity
+ * follows the tilt. Black behind, like the Duo's panel edge.
  */
 export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const W = project._w;
@@ -229,22 +230,26 @@ export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const tilt = Math.max(4, Math.min(45, o.tilt ?? 24));
   const maxBlur = Math.max(0, o.blur ?? 55) * scale;
   const maxDim = Math.max(0, Math.min(1, o.shade ?? 0.6));
-  const k = 1.04; // a little bleed so the near edge never shows a gap
+  const K = 6; // switch steepness: plate fully on at |tilt| ≥ 1/K of the range
+  const kh = 1.03; // a little bleed above / below for the vertical tilt
   const src = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), scale);
-  const PW = Math.round(W * k * scale);
-  const PH = Math.round(H * k * scale);
+  const PW = Math.round(W * scale);
+  const PH = Math.round(H * kh * scale);
   const pic = makeCanvas(PW, PH);
   pic.getContext('2d').drawImage(src, 0, 0, PW, PH);
-  const geo = { x: W / 2, y: H / 2, w: Math.round(W * k), h: Math.round(H * k), fit: 'stretch', plane: 'background' };
-  const gyro = (fade) => ({ tilt, tiltV: Math.round(tilt * 0.35), fold: 0, fade, fadeMin: -1, fadeMax: 1 });
+  const picAsset = await canvasAsset(pic, 'image/jpeg', 0.92);
+  const geo = (hinge) => ({ x: W / 2, y: H / 2, w: W, h: Math.round(H * kh), fit: 'stretch', plane: 'background', anchor: { x: hinge === 'left' ? 0 : 1, y: 0.5 } });
+  const gyro = (fade, lo, hi) => ({ tilt, tiltV: Math.round(tilt * 0.25), fold: 0, fade, fadeMin: lo, fadeMax: hi });
   const layers = [
     newLayer('color', project, { name: 'Duo backdrop', color: '#000000', plane: 'background' }),
-    newLayer('image', project, { ...geo, name: 'Duo picture', asset: await canvasAsset(pic, 'image/jpeg', 0.92), gyro: gyro('none') }),
-    // tilting right (+x) turns the right edge away; tilting left the left edge
-    newLayer('image', project, { ...geo, name: 'Duo far right', asset: await canvasAsset(duoFarCopy(pic, 'right', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x') }),
-    newLayer('image', project, { ...geo, name: 'Duo far left', asset: await canvasAsset(duoFarCopy(pic, 'left', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('-x') }),
+    // tilt left: hinge right, left side away. Visible for tilt ≤ 0 (opacity 1 − K·t)
+    newLayer('image', project, { ...geo('right'), name: 'Duo L', asset: picAsset, gyro: gyro('x', 1 + K, 1 - K) }),
+    newLayer('image', project, { ...geo('right'), name: 'Duo L far', asset: await canvasAsset(duoFarCopy(pic, 'left', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x', 1, -1) }),
+    // tilt right: hinge left, right side away. Visible for tilt > 0 (opacity K·t)
+    newLayer('image', project, { ...geo('left'), name: 'Duo R', asset: picAsset, gyro: gyro('x', -K, K) }),
+    newLayer('image', project, { ...geo('left'), name: 'Duo R far', asset: await canvasAsset(duoFarCopy(pic, 'right', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x', -1, 1) }),
   ];
-  if (o.unlock) for (const l of layers.slice(1)) l.states = { Unlock: { scale: 1.04 }, Sleep: { opacity: 0.6 } };
+  if (o.unlock) for (const l of layers.slice(1)) l.states = { Sleep: { opacity: 0.6 } };
   return { layers, hideOthers: true };
 }
 
