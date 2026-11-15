@@ -3,7 +3,7 @@ import { STATES, clone, uid } from '../core/model.js';
 import { getDevice } from '../core/devices.js';
 import { mountPreview, playUnlockDemo, enableDeviceMotion, resetTilt } from './preview.js';
 import { mountPanels, installGuide, ADD } from './panels.js';
-import { el, segmented, modal, toast, button, runSyncs, persistent } from './dom.js';
+import { el, segmented, modal, toast, button, runSyncs, persistent, confirmModal } from './dom.js';
 import { listProjects, deleteProject, saveProject, collectGarbage, requestPersistence, getProject } from '../browser/storage.js';
 import { projectThumbnail } from './assets.js';
 import { TEMPLATES } from './templates.js';
@@ -105,7 +105,7 @@ async function openLibrary() {
         ]),
         el('button', { class: 'icon-btn', title: 'Duplicate', 'aria-label': 'Duplicate', onclick: async () => { const c = clone(p); c.id = uid('p'); c.name += ' copy'; c.updated = Date.now(); await saveProject(c); close(); openLibrary(); } }, '⧉'),
         el('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: async () => {
-          if (!confirm(`Delete “${p.name}”?`)) return;
+          if (!(await confirmModal('Delete wallpaper', `Delete “${p.name}”? This can’t be undone.`))) return;
           await deleteProject(p.id);
           collectGarbage();
           if (p.id === store.project?.id) {

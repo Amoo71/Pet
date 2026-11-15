@@ -229,8 +229,26 @@ export function download(bytes, filename, type = 'application/zip') {
   }, 4000);
 }
 
+/** Ask the user to confirm inside the page (window.confirm is unavailable in some embeds). */
+export function confirmModal(title, text, okLabel = 'Delete', cls = 'danger') {
+  return new Promise((resolve) => {
+    modal(title, el('p', {}, text), [
+      ['Cancel', (c) => (c(), resolve(false))],
+      [okLabel, (c) => (c(), resolve(true)), cls],
+    ]);
+  });
+}
+
 /** Share sheet on iOS (lets the user send the .tendies straight to Pocket Poster / Files), else download. */
 export async function shareOrDownload(bytes, filename) {
+  if (globalThis.claude && typeof globalThis.claude.use === 'function') {
+    // claude.ai artifact preview: the sandbox blocks file downloads and the share sheet
+    modal('Export is not available in this preview', el('div', { class: 'form' }, [
+      el('p', {}, 'This link is a live preview of Tendies Studio. The sandbox it runs in blocks file downloads, so .tendies files can’t be saved from here.'),
+      el('p', { class: 'muted' }, 'Open the full app (GitHub Pages build of this repository) to export – your design is easy to rebuild there, or start from the same template.'),
+    ]), [['OK', (c) => c(), 'primary']]);
+    return 'cancelled';
+  }
   const file = new File([bytes], filename, { type: 'application/octet-stream' });
   if (navigator.canShare?.({ files: [file] })) {
     try {
