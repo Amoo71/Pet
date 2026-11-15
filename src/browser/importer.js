@@ -189,7 +189,7 @@ function readAnimations(link) {
       easing: a.getAttribute('timingFunction') || 'linear',
       delay: Math.max(0, Number(a.getAttribute('timeOffset')) || 0),
     };
-    const make = (prop, vs) => ({ id: uid('A'), preset: 'custom', prop, amount: 0, keys: vs.map((v, i) => ({ t: Math.max(0, Math.min(1, keyTimes[i])), v: Math.round(v * 1000) / 1000 })), ...timing, enabled: true });
+    const make = (prop, vs) => ({ id: uid('A'), preset: 'custom', prop, amount: 0, absPos: !kp.startsWith('transform.'), keys: vs.map((v, i) => ({ t: Math.max(0, Math.min(1, keyTimes[i])), v: Math.round(v * 1000) / 1000 })), ...timing, enabled: true });
     const m = link.pm || I2;
     const sd = (dx, dy) => [m[0] * dx + m[2] * dy, -(m[1] * dx + m[3] * dy)];
     if (kp === 'position' || kp === 'position.x' || kp === 'position.y' || kp.startsWith('transform.translation')) {
@@ -487,6 +487,15 @@ export async function importTendies(buf, storeAsset) {
             const baseX = layer.x, baseY = layer.y;
             if (Math.abs(dx) > 1e-6) tgt.x = baseX + dx;
             if (Math.abs(dy) > 1e-6) tgt.y = baseY + dy;
+            // an animation of the absolute position wins over the state on device: keep its result unchanged
+            if (key === 'Locked') {
+              const ls = Math.abs(layer.scale || 1) || 1;
+              for (const a of layer.anims || []) {
+                if (!a.absPos) continue;
+                if (a.prop === 'x' && Math.abs(dx) > 1e-6) for (const k of a.keys) k.v -= dx / ls;
+                if (a.prop === 'y' && Math.abs(dy) > 1e-6) for (const k of a.keys) k.v -= dy / ls;
+              }
+            }
             continue;
           }
           const g0 = layerGeo.get(layer);

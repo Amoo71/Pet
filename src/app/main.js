@@ -324,7 +324,7 @@ async function handleFile(f) {
 
 // ---------------------------------------------------------------- clean start
 
-const APP_VERSION = '2026-11-15.4';
+const APP_VERSION = '2026-11-15.5';
 /** every start: drop unused stored pictures; on a new version also wipe old caches */
 async function cleanOnStart() {
   try {
