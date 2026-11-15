@@ -305,6 +305,8 @@ export async function tuneSystem(input, { look, appearance, motion, family } = {
 
 export const RAW_CAPABLE = (id) => id === 'vignette' || /^fx-\w+$/.test(id);
 
+const EDITABLE_ANIM = /^(contents|position(\.[xy])?|transform\.translation\.[xy]|transform\.rotation(\.z)?|transform\.scale(\.xy)?|opacity)$/;
+
 /** true when a package should be morphed in place instead of being rebuilt from editable layers:
  *  Apple's own wallpapers (HEIC strips, nested 3D transform rigs) lose detail in the editor. */
 export async function prefersRawMorph(input) {
@@ -314,7 +316,9 @@ export async function prefersRawMorph(input) {
   if ([...files.keys()].some((p) => /\.heic$/i.test(p))) return true;
   for (const c of info.camls) {
     const xml = dec.decode(files.get(c));
-    for (const m of xml.matchAll(/<CATransformLayer\b[^>]*\sname="([^"]*)"/g)) if (!/ Parallax( 2)?$/.test(m[1])) return true;
+    for (const m of xml.matchAll(/<CATransformLayer\b[^>]*\sname="([^"]*)"/g)) if (!/ (Parallax( 2)?|Tilt)$/.test(m[1])) return true;
+    // endless animations the editor can't represent (bounds, corner radius, colour filters, full transform …)
+    for (const m of xml.matchAll(/<(?:animation|p)\b[^>]*\bkeyPath="([^"]+)"[^>]*\brepeatCount="(?:inf|\d{4,})"/g)) if (!EDITABLE_ANIM.test(m[1])) return true;
   }
   return false;
 }

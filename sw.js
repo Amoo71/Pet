@@ -1,5 +1,5 @@
 // Offline support: network-first for app files, cached copy as offline fallback.
-const CACHE = 'tendies-studio-v12';
+const CACHE = 'tendies-studio-2026-11-15.4';
 const SHELL = [
   './',
   './index.html',
@@ -57,7 +57,8 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       try {
-        const res = await fetch(req);
+        // bypass the HTTP cache (GitHub Pages caches 10 min) – a refresh always gets the newest code
+        const res = await fetch(req, { cache: 'no-cache' });
         if (res.ok) cache.put(req, res.clone());
         return res;
       } catch {

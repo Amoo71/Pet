@@ -400,12 +400,15 @@ export function gyroTranslations(layer) {
 export function layerGyroGroups(layer, name) {
   const out = [];
   const { main, cross } = gyroTranslations(layer);
+  // CA is y-up, the editor/preview y-down: a move along y is written negated, so the device
+  // moves the same way as the preview (and the same way as the 3D tilt, whose x rotation is negated too)
+  const sgn = (key) => (key === 'y' ? -1 : 1);
   for (const axis of ['x', 'y']) {
-    if (main[axis]) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -main[axis], max: main[axis], type: 'integer' });
+    if (main[axis]) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -main[axis] * sgn(axis), max: main[axis] * sgn(axis), type: 'integer' });
   }
   for (const axis of ['x', 'y']) {
     const key = axis === 'x' ? 'y' : 'x';
-    if (cross[axis]) out.push({ name: `${name} Parallax 2`, axis, keyPath: `transform.translation.${key}`, min: -cross[axis], max: cross[axis], type: 'integer' });
+    if (cross[axis]) out.push({ name: `${name} Parallax 2`, axis, keyPath: `transform.translation.${key}`, min: -cross[axis] * sgn(key), max: cross[axis] * sgn(key), type: 'integer' });
   }
   const t = layer.gyro?.tilt || 0;
   if (t > 0) {
@@ -427,6 +430,12 @@ export function layerGyroGroups(layer, name) {
     out.push({ name: `${name} GyroFade`, axis, keyPath: 'opacity', min: flip ? hi : lo, max: flip ? lo : hi, type: 'real' });
   }
   return out;
+}
+
+/** device calibration: Project → "Gyro on device: flip left/right / up/down" swaps the gyro range of that axis */
+function flipGyro(groups, project) {
+  const f = project.gyroFlip || {};
+  return groups.map((g) => (f[g.axis] ? { ...g, min: g.max, max: g.min } : g));
 }
 
 const perspectiveAttr = (project, layers) =>
@@ -457,7 +466,7 @@ export function buildModernCaml(project, resources, opts = {}) {
     const n = names.get(l.id);
     for (const g of layerPropertyGroups(l, n, H))
       props.push(dict([['image', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['v_home', 'real', num(g.home)], ['v_lock', 'real', num(g.lock)], ['v_sleep', 'real', num(g.sleep)], ['view', 'string', view]], I.repeat(4)));
-    for (const g of layerGyroGroups(l, n))
+    for (const g of flipGyro(layerGyroGroups(l, n), project))
       parallax.push(dict([['axis', 'string', g.axis], ['image', 'string', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['mapMaxTo', g.type, num(g.max)], ['mapMinTo', g.type, num(g.min)], ['title', 'string', 'Gyro'], ['view', 'string', view]], I.repeat(4)));
   }
   const group = (plane) => {
@@ -524,7 +533,7 @@ ${I.repeat(3)}</CALayer>`;
         const n = names.get(l.id);
         for (const g of layerPropertyGroups(l, n, H))
           props.push([['keyPath', 'string', g.keyPath], ['landscape_home', 'real', g.home], ['landscape_lock', 'real', g.lock], ['landscape_sleep', 'real', g.sleep], ['layerName', 'string', g.name], ['portrait_home', 'real', g.home], ['portrait_lock', 'real', g.lock], ['portrait_sleep', 'real', g.sleep]]);
-        for (const g of layerGyroGroups(l, n))
+        for (const g of flipGyro(layerGyroGroups(l, n), project))
           par.push([['axis', 'string', g.axis], ['image', 'string', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['mapMaxTo', g.type, g.max], ['mapMinTo', g.type, g.min], ['title', 'string', 'Gyro'], ['view', 'string', plane.id === 'background' ? 'Background' : 'Floating']]);
       }
       trees[plane.id] = { xml, name: groupName, props, par };
