@@ -215,6 +215,23 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   assert.equal(await pg.evaluate(() => document.getElementById('app').dataset.panel), 'open');
   await pg.click('#duoBtn');
   await pg.waitForSelector('duo-fold');
+  // importer geometry: nested scaled group with a shifted origin, geometryFlipped, rotated group, URL-encoded src
+  const geo = await pg.evaluate(async () => {
+    const { createZip } = await import('/src/core/zip.js');
+    const { toBinaryPlist } = await import('/src/core/bplist.js');
+    const { importTendies } = await import('/src/browser/importer.js');
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    const img = (n, a) => `<CALayer name="${n}" ${a}><contents type="CGImage" src="assets/a%201.png"/></CALayer>`;
+    const caml = `<?xml version="1.0"?><caml xmlns="http://www.apple.com/CoreAnimation/1.0"><CALayer bounds="0 0 390 844" position="195 422" geometryFlipped="1" name="Root Layer"><sublayers>${img('A', 'bounds="0 0 100 50" position="50 25"')}<CALayer name="G" bounds="10 20 200 200" position="195 422" transform="scale(2, 2, 1)"><sublayers>${img('B', 'bounds="0 0 20 10" position="20 30"')}</sublayers></CALayer><CALayer name="R" bounds="0 0 100 100" position="300 700" transform="rotate(90deg)"><sublayers>${img('D', 'bounds="0 0 20 10" position="80 50"')}</sublayers></CALayer></sublayers></CALayer></caml>`;
+    const zip = createZip([
+      { path: 'X.wallpaper/Wallpaper.plist', data: toBinaryPlist({ assets: { lockAndHome: { default: { type: 'ParameterizedCA' } } } }) },
+      { path: 'X.wallpaper/w.ca/main.caml', data: new TextEncoder().encode(caml) },
+      { path: 'X.wallpaper/w.ca/assets/a 1.png', data: png },
+    ]);
+    const { projects } = await importTendies(zip, async () => 'asset');
+    return Object.fromEntries(projects[0].layers.map((l) => [l.name, [l.x, l.y, l.w * l.scale, l.h * l.scale, l.rotation].map((v) => Math.round(v) + 0)]));
+  });
+  assert.deepEqual(geo, { A: [50, 25, 100, 50, 0], B: [15, 242, 40, 20, 0], D: [300, 730, 20, 10, 90] }, 'importer geometry ' + JSON.stringify(geo));
   assert.deepEqual(errors, []);
   console.log('E2E OK →', OUT);
   await browser.close();

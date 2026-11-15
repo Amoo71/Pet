@@ -9,17 +9,63 @@ import { newProject, newLayer, uid, ANIMATABLE } from '../core/model.js';
 import { DEVICES } from '../core/devices.js';
 
 const mime = (p) => (/\.jpe?g$/i.test(p) ? 'image/jpeg' : /\.heic$/i.test(p) ? 'image/heic' : 'image/png');
+const safeDecode = (s) => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+};
 const nums = (s) => String(s || '').trim().split(/[\s,]+/).map(Number);
 const RAD = 180 / Math.PI;
 
 function parseTransform(s) {
-  const out = { rot: 0, scale: 1 };
+  const out = { rot: 0, scale: 1, sx: 1, sy: 1 };
   if (!s) return out;
-  const r = /rotate\(\s*(-?[\d.e-]+)deg\s*\)/.exec(s);
-  if (r) out.rot = Number(r[1]);
-  const sc = /scale\(\s*(-?[\d.e-]+)/.exec(s);
-  if (sc) out.scale = Number(sc[1]);
+  // z rotations only (rotate(Xdeg) without an axis, or with axis 0,0,1)
+  for (const m of s.matchAll(/rotate\(\s*(-?[\d.e+-]+)deg\s*(?:,\s*(-?[\d.e+-]+)\s*,\s*(-?[\d.e+-]+)\s*,\s*(-?[\d.e+-]+)\s*)?\)/g)) {
+    if (m[2] == null || (Number(m[2]) === 0 && Number(m[3]) === 0 && Number(m[4]) !== 0)) out.rot += Number(m[1]) * (m[4] != null && Number(m[4]) < 0 ? -1 : 1);
+  }
+  for (const m of s.matchAll(/scale\(\s*(-?[\d.e+-]+)(?:\s*,\s*(-?[\d.e+-]+))?/g)) {
+    out.sx *= Number(m[1]);
+    out.sy *= m[2] != null ? Number(m[2]) : Number(m[1]);
+  }
+  out.scale = out.sx;
   return out;
+}
+
+// 2D affine matrices [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f (CA space, y up)
+const I2 = [1, 0, 0, 1, 0, 0];
+const mm = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+const mT = (x, y) => [1, 0, 0, 1, x, y];
+const mRS = (deg, sx, sy) => {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r), s = Math.sin(r);
+  return [c * sx, s * sx, -s * sy, c * sy, 0, 0];
+};
+const mApply = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+
+/** matrix from a layer's own bounds space into its parent's sublayer space – exactly like Core Animation */
+function layerMatrix(el) {
+  const [bx = 0, by = 0, bw = 0, bh = 0] = nums(el.getAttribute('bounds'));
+  const [px = 0, py = 0] = nums(el.getAttribute('position'));
+  const [ax, ay] = el.hasAttribute('anchorPoint') ? nums(el.getAttribute('anchorPoint')) : [0.5, 0.5];
+  const tr = parseTransform(el.getAttribute('transform'));
+  return mm(mm(mm(mT(px || 0, py || 0), mRS(tr.rot, tr.sx, tr.sy)), mT(-(ax ?? 0.5) * (bw || 0), -(ay ?? 0.5) * (bh || 0))), mT(-(bx || 0), -(by || 0)));
+}
+/** the space a layer's sublayers live in (geometryFlipped flips it, sublayerTransform 2D part applies) */
+function childSpace(el, own) {
+  const [, by = 0, , bh = 0] = nums(el.getAttribute('bounds'));
+  let m = own;
+  const st = el.getAttribute('sublayerTransform');
+  if (st && !/perspective/.test(st)) {
+    const t = parseTransform(st);
+    const [bx2 = 0, by2 = 0, bw2 = 0, bh2 = 0] = nums(el.getAttribute('bounds'));
+    const cx = bx2 + bw2 / 2, cy = by2 + bh2 / 2;
+    m = mm(m, mm(mm(mT(cx, cy), mRS(t.rot, t.sx, t.sy)), mT(-cx, -cy)));
+  }
+  if (el.getAttribute('geometryFlipped') === '1') m = mm(m, [1, 0, 0, -1, 0, 2 * (by || 0) + (bh || 0)]);
+  return m;
 }
 
 function planeOf(caName, wp) {
@@ -82,23 +128,35 @@ export async function importTendies(buf, storeAsset) {
       const byId = new Map(); // CA id -> editor layer
       const byName = new Map(); // CA layer name -> [{layer, opacityAttr}]
       const resolve = async (s) => {
-        const bytes = files.get(caDir + s);
+        // srcs are often URL-encoded ("woopah1%201.PNG" for "woopah1 1.PNG")
+        let dec2 = s;
+        try {
+          dec2 = decodeURIComponent(s);
+        } catch {
+          /* keep */
+        }
+        const bytes = files.get(caDir + s) || files.get(caDir + dec2) || files.get(caDir + s.replace(/%20/g, ' '));
         return bytes ? storeAsset(new Blob([bytes], { type: mime(s) })) : null;
       };
-      const walk = async (el, ox, oy, op, chain, plane) => {
+      const layerGeo = new Map(); // editor layer -> { pm: parent sublayer-space matrix, px, py }
+      const walk = async (el, space, op, chain, plane) => {
         for (const child of el.querySelectorAll(':scope > sublayers > *')) {
           const tag = child.tagName;
           const name = child.getAttribute('name') || '';
           let pl = plane;
           if (name === 'BACKGROUND') pl = 'background';
           if (name === 'FLOATING' || name === 'FOREGROUND') pl = 'floating';
-          const [, , w, h] = nums(child.getAttribute('bounds'));
-          const [px, py] = nums(child.getAttribute('position'));
-          const anchor = child.hasAttribute('anchorPoint') ? nums(child.getAttribute('anchorPoint')) : [0.5, 0.5];
-          const cx = ox + (px || 0) + (0.5 - anchor[0]) * (w || 0);
-          const cy = oy + (py || 0) + (0.5 - anchor[1]) * (h || 0);
+          const [bx0 = 0, by0 = 0, w, h] = nums(child.getAttribute('bounds'));
+          const own = mm(space, layerMatrix(child));
+          // centre of the layer in document space (y up), its on-screen size and rotation
+          const [cx, cy] = mApply(own, (bx0 || 0) + (w || 0) / 2, (by0 || 0) + (h || 0) / 2);
+          const wsx = Math.hypot(own[0], own[1]);
+          const wsy = Math.hypot(own[2], own[3]);
+          const wrot = (Math.atan2(own[1], own[0]) * 180) / Math.PI;
+          const [ppx = 0, ppy = 0] = nums(child.getAttribute('position'));
           const opAttr = child.hasAttribute('opacity') ? Number(child.getAttribute('opacity')) : 1;
           const tr = parseTransform(child.getAttribute('transform'));
+          const ownUniform = Math.abs(Math.abs(tr.sx) - Math.abs(tr.sy)) < 1e-6 && tr.sx !== 0;
           const link = { name, opAttr, el: child };
           const nextChain = [...chain, link];
           if (tag === 'CAEmitterLayer') {
@@ -106,7 +164,7 @@ export async function importTendies(buf, storeAsset) {
             continue;
           }
           if (tag === 'CABackdropLayer') {
-            const l = newLayer('glass', proj, { name: name || 'Glass', plane: pl, x: cx, y: H - cy, w: w || 100, h: h || 100, cornerRadius: Number(child.querySelector('CASDFElementLayer')?.getAttribute('cornerRadius')) || Number(child.getAttribute('cornerRadius')) || 0, glass: { mode: child.querySelector('CASDFLayer') ? 'liquid' : 'live', blur: 20, tint: '#ffffff', tintOpacity: 0.1, border: 0.4, saturation: 1.4, shine: 0.3, refraction: 80 } });
+            const l = newLayer('glass', proj, { name: name || 'Glass', plane: pl, x: cx, y: H - cy, w: (w || 100) * wsx, h: (h || 100) * wsy, cornerRadius: Number(child.querySelector('CASDFElementLayer')?.getAttribute('cornerRadius')) || Number(child.getAttribute('cornerRadius')) || 0, glass: { mode: child.querySelector('CASDFLayer') ? 'liquid' : 'live', blur: 20, tint: '#ffffff', tintOpacity: 0.1, border: 0.4, saturation: 1.4, shine: 0.3, refraction: 80 } });
             proj.layers.push(l);
             for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer: l, opAttr: c.opAttr });
             const id = child.getAttribute('id');
@@ -116,9 +174,11 @@ export async function importTendies(buf, storeAsset) {
           const img = child.querySelector(':scope > contents > CGImage, :scope > contents[src]');
           const src = img?.getAttribute('src');
           const frameAnim = child.querySelector(':scope > animations > [keyPath="contents"]');
-          if (src || frameAnim) {
+          let frameSrcs = frameAnim ? [...frameAnim.querySelectorAll('values > CGImage')].map((n) => n.getAttribute('src')) : [];
+          if (frameAnim && !frameSrcs.some((x) => files.has(caDir + x) || files.has(caDir + safeDecode(x)))) frameSrcs = [];
+          if (src || frameSrcs.length) {
             let layer;
-            if (frameAnim) {
+            if (frameSrcs.length) {
               const srcs = [...frameAnim.querySelectorAll('values > CGImage')].map((n) => n.getAttribute('src'));
               const uniq = [...new Set(srcs)];
               const ids = await Promise.all(uniq.map(resolve));
@@ -135,7 +195,7 @@ export async function importTendies(buf, storeAsset) {
             }
             const grav = child.getAttribute('contentsGravity');
             const cum = nextChain.reduce((s, c) => s * c.opAttr, op);
-            const rot = nextChain.reduce((s, c) => s + parseTransform(c.el.getAttribute('transform')).rot, 0);
+            const rot = wrot;
             const blend = [...nextChain].reverse().map((c) => c.el.querySelector(':scope > compositingFilter')?.getAttribute('filter')).find(Boolean);
             const blur = [...nextChain].reverse().map((c) => c.el.querySelector(':scope > filters > [filter="gaussianBlur"]')?.getAttribute('inputRadius')).find(Boolean);
             Object.assign(layer, {
@@ -143,11 +203,12 @@ export async function importTendies(buf, storeAsset) {
               name: (name && !/ (Content|Rim)$/.test(name) ? name : nextChain.map((c) => c.name).find((n) => n && !/^(BACKGROUND|FLOATING|FOREGROUND|Root Layer)$/.test(n) && !/ (Parallax( 2)?|Anim \d+|Content|Rim|Tilt|Fade|GyroFade)$/.test(n))) || layer.name,
               x: cx,
               y: H - cy,
-              w: w || proj._w,
-              h: h || proj._h,
+              // the layer's own uniform scale stays editable as Scale; parents' scale is baked into the size
+              w: (w || proj._w) * (ownUniform ? wsx / Math.abs(tr.sx) : wsx),
+              h: (h || proj._h) * (ownUniform ? wsy / Math.abs(tr.sy) : wsy),
               opacity: cum,
-              rotation: -rot,
-              scale: tr.scale,
+              rotation: Math.round(-rot * 100) / 100,
+              scale: ownUniform ? Math.abs(tr.sx) : 1,
               hidden: child.getAttribute('hidden') === '1',
               fit: grav === 'resizeAspectFill' ? 'cover' : grav === 'resizeAspect' ? 'contain' : 'stretch',
               cornerRadius: Number(child.getAttribute('cornerRadius')) || 0,
@@ -155,16 +216,24 @@ export async function importTendies(buf, storeAsset) {
               filters: { blur: Number(blur) || 0, hue: 0, saturate: 1, contrast: 1 },
             });
             proj.layers.push(layer);
+            layerGeo.set(layer, { pm: space, px: ppx, py: ppy });
             for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer, opAttr: c.opAttr });
             for (const c of nextChain) {
               const id = c.el.getAttribute('id');
               if (id && !byId.has(id)) byId.set(id, layer);
             }
           }
-          if (nextChain.length < 10) await walk(child, cx - (w || 0) / 2, cy - (h || 0) / 2, op, nextChain, pl);
+          if (nextChain.length < 12) await walk(child, childSpace(child, own), op, nextChain, pl);
         }
       };
-      await walk(root, 0, 0, 1, [], planeOf(caName, wp));
+      // the root's sublayers: root bounds space = document space
+      await walk(root, childSpace(root, I2), 1, [], planeOf(caName, wp));
+      // a position change (in the layer's parent space) → screen delta
+      const screenDelta = (layer, dx, dy) => {
+        const g = layerGeo.get(layer);
+        const m = g ? g.pm : I2;
+        return [m[0] * dx + m[2] * dy, -(m[1] * dx + m[3] * dy)];
+      };
 
       // LayeredAnimation states
       for (const st of root.querySelectorAll(':scope > states > LKState')) {
@@ -173,12 +242,21 @@ export async function importTendies(buf, storeAsset) {
         const key = mm[2] === 'Dark' ? `${mm[1]}@dark` : mm[1];
         for (const sv of st.querySelectorAll('LKStateSetValue')) {
           const layer = byId.get(sv.getAttribute('targetId'));
-          const kp = sv.getAttribute('keyPath');
+          const kp = sv.getAttribute('keyPath') === 'transform.scale.xy' ? 'transform.scale' : sv.getAttribute('keyPath');
           const val = sv.querySelector('value');
           if (!layer || !val) continue;
           const def = ANIMATABLE.find((a) => a.keyPath === kp || a.pcaKeyPath === kp);
           if (!def) continue;
           let v = Number(val.getAttribute('value'));
+          const g = layerGeo.get(layer);
+          if ((def.id === 'x' || def.id === 'y') && g) {
+            const [dx, dy] = def.id === 'x' ? screenDelta(layer, v - g.px, 0) : screenDelta(layer, 0, v - g.py);
+            const tgt = key === 'Locked' ? layer : (layer.states[key] ||= {});
+            const baseX = layer.x, baseY = layer.y;
+            if (Math.abs(dx) > 1e-6) tgt.x = baseX + dx;
+            if (Math.abs(dy) > 1e-6) tgt.y = baseY + dy;
+            continue;
+          }
           if (def.id === 'y') v = H - v;
           if (def.id === 'rotation') v = -v * RAD;
           if (key === 'Locked') layer[def.id] = v;
@@ -201,12 +279,12 @@ export async function importTendies(buf, storeAsset) {
           const vs = Number(val(d, 'v_sleep'));
           for (const { layer, opAttr } of targets) {
             const set = (st, prop, v) => (layer.states[st] ||= {})[prop] = Math.round(v * 1000) / 1000;
-            if (kp === 'position.x') {
-              set('Unlock', 'x', layer.x + (vh - vl));
-              set('Sleep', 'x', layer.x + (vs - vl));
-            } else if (kp === 'position.y') {
-              set('Unlock', 'y', layer.y - (vh - vl));
-              set('Sleep', 'y', layer.y - (vs - vl));
+            if (kp === 'position.x' || kp === 'position.y') {
+              const d = (v) => (kp === 'position.x' ? screenDelta(layer, v, 0) : screenDelta(layer, 0, v));
+              const [hx, hy] = d(vh - vl);
+              const [sx2, sy2] = d(vs - vl);
+              if (Math.abs(hx) > 1e-6 || Math.abs(sx2) > 1e-6) (set('Unlock', 'x', layer.x + hx), set('Sleep', 'x', layer.x + sx2));
+              if (Math.abs(hy) > 1e-6 || Math.abs(sy2) > 1e-6) (set('Unlock', 'y', layer.y + hy), set('Sleep', 'y', layer.y + sy2));
             } else if (kp === 'opacity') {
               const rest = opAttr > 0 ? layer.opacity / opAttr : 1;
               layer.opacity = rest * vl;
