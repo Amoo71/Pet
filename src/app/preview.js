@@ -82,7 +82,7 @@ function layout() {
     el.style.top = `${oy}px`;
     el.style.width = `${p._w}px`;
     el.style.height = `${p._h}px`;
-    el.style.perspective = `${p.perspective || 900}px`;
+    el.style.perspective = p.perspective === 0 ? 'none' : `${p.perspective || 900}px`;
   }
 }
 
@@ -129,10 +129,12 @@ function render(reason) {
       let n = nodes.get(l.id);
       if (!n) {
         const px = el('div', { class: 'px' });
+        const tl = el('div', { class: 'px tl' }); // gyro tilt / fold (mirrors the export's "<name> Tilt" transform layer)
         const outer = el('div', { class: 'layer', 'data-id': l.id });
         const content = el('div', { class: 'content' });
-        px.append(outer);
-        n = { px, outer, content, anims: [], sig: '', animSig: '' };
+        px.append(tl);
+        tl.append(outer);
+        n = { px, tl, outer, content, anims: [], sig: '', animSig: '' };
         outer.append(content);
         nodes.set(l.id, n);
       }
@@ -177,13 +179,11 @@ function paintLayer(l, n, p, animate) {
   o.style.opacity = Math.max(0, Math.min(1, e.opacity));
   const an = l.anchor || { x: 0.5, y: 0.5 };
   o.style.transformOrigin = `${an.x * 100}% ${an.y * 100}%`;
-  if (n.gy) n.gy.style.transformOrigin = o.style.transformOrigin;
-  o.style.transform = `rotate(${e.rotation}deg) rotateY(${e.rotY || 0}deg) rotateX(${e.rotX || 0}deg) scale(${e.scale})`;
-  const folding = p.format !== 'classic' && (l.gyro?.tilt > 0 || l.gyro?.fold > 0);
-  o.style.transformStyle = e.rotX || e.rotY || folding ? 'preserve-3d' : '';
-  // mirrors the export: the layer gives its folding content its own perspective
-  o.style.perspective = folding ? `${p.perspective || 900}px` : '';
-  o.style.perspectiveOrigin = folding ? `${an.x * 100}% ${an.y * 100}%` : '';
+  // the tilt wrapper pivots around the layer's anchor (screen coordinates)
+  n.tl.style.transformOrigin = `${e.x - l.w / 2 + an.x * l.w}px ${e.y - l.h / 2 + an.y * l.h}px`;
+  const sx = l.sx || 1;
+  o.style.transform = `rotate(${e.rotation}deg) rotateY(${e.rotY || 0}deg) rotateX(${e.rotX || 0}deg) scale(${e.scale * sx}, ${e.scale})`;
+  o.style.transformStyle = '';
   o.style.borderRadius = l.cornerRadius ? `${l.cornerRadius}px` : '';
   o.style.overflow = l.cornerRadius ? 'hidden' : '';
   o.style.visibility = l.hidden ? 'hidden' : '';
@@ -632,19 +632,28 @@ export function playUnlockDemo() {
 /** gyro move (parallax wrapper), 3D tilt and fade (applied to the content chain root) */
 function applyGyro(l, n, p) {
   const on = p.format !== 'classic';
-  const N = on ? l.parallax || 0 : 0;
-  n.px.style.transform = N ? `translate(${live.tiltX * N}px, ${live.tiltY * N}px)` : '';
+  // same mapping as the export: main (x→x, y→y) + cross (x→y, y→x) translations
+  let mx = 0, my = 0, cx = 0, cy = 0;
+  if (on) {
+    mx = my = l.parallax || 0;
+    for (const m of l.gyroMoves || []) {
+      if (m.axis === m.key) m.axis === 'x' ? (mx += m.n) : (my += m.n);
+      else m.axis === 'x' ? (cx += m.n) : (cy += m.n);
+    }
+  }
+  const tx = live.tiltX * mx + live.tiltY * cy;
+  const ty = live.tiltY * my + live.tiltX * cx;
+  n.px.style.transform = tx || ty ? `translate(${tx}px, ${ty}px)` : '';
   const g = on ? l.gyro || {} : {};
-  const first = n.gy;
-  if (!first) return;
   const t = g.tilt || 0;
+  const tv = g.tiltV ?? t;
   const fold = g.fold || 0;
-  const an = l.anchor || { x: 0.5, y: 0.5 };
-  first.style.transformOrigin = `${an.x * 100}% ${an.y * 100}%`;
   const parts = [];
   if (fold) parts.push(`rotateY(${((live.tiltX + 1) / 2) * fold}deg)`);
-  if (t) parts.push(`rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * t}deg)`);
-  first.style.transform = parts.join(' ');
+  if (t) parts.push(`rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * tv}deg)`);
+  n.tl.style.transform = parts.join(' ');
+  const first = n.gy;
+  if (!first) return;
   if (g.fade && g.fade !== 'none') {
     const axis = g.fade.replace('-', '');
     let u = ((axis === 'x' ? live.tiltX : live.tiltY) + 1) / 2;

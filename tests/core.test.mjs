@@ -1,7 +1,8 @@
 // Node test of the export pipeline: node tests/core.test.mjs <outdir>
 import { newProject, newLayer, newAnim, migrateProject } from '../src/core/model.js';
 import { buildTendies, buildBatter, validateProject } from '../src/core/tendies.js';
-import { readZip } from '../src/core/zip.js';
+import { readZip, createZip } from '../src/core/zip.js';
+import { rawMorph, prefersRawMorph } from '../src/core/rawmorph.js';
 import { parsePlist } from '../src/core/plist.js';
 import { toBinaryPlist } from '../src/core/bplist.js';
 import { PCA_FILES } from '../src/core/template-data.js';
@@ -145,5 +146,59 @@ assert.equal(old.layers[0].anims[0].preset, 'spin');
   assert(caml.includes(`position="${p._w / 2} ${p._h / 2}"`), 'outer positioned at the hinge');
   assert(caml.includes('value="transform.rotation.y"') && caml.includes('<mapMaxTo type="real" value="1.0472"/>'), 'fold gyro 60°');
   assert(caml.includes('sublayerTransform="perspective('), 'own perspective');
+}
+
+// --- gyro translation incl. cross terms (Duo 3D tilt tiles)
+{
+  const p = newProject();
+  p.layers.push(newLayer('color', p, { gyroMoves: [{ axis: 'x', key: 'x', n: -30 }, { axis: 'x', key: 'y', n: 12 }, { axis: 'y', key: 'x', n: 12 }] }));
+  const z = await readZip(await buildTendies(p, render));
+  const caml = text(z.get([...z.keys()].find((n) => n.endsWith('main.caml'))));
+  assert(caml.includes('name="Color Parallax"') && caml.includes('name="Color Parallax 2"'), 'two parallax wrappers');
+  assert(caml.includes('<mapMaxTo type="integer" value="-30"/>'), 'negative main move');
+  assert(/<axis type="string" value="x"\/>\s*<image type="string" value="null"\/>\s*<keyPath type="string" value="transform.translation.y"\/>/.test(caml), 'cross term x→y');
+}
+// --- Apple-style tilt rig: gyro rotation on a CATransformLayer outside the pre-rotated layer
+{
+  const p = newProject();
+  p.perspective = 0;
+  const half = newLayer('image', p, { asset: 'a', x: p._w / 2, w: p._w / 2, anchor: { x: 0, y: 0.5 }, rotY: -57, sx: 1 / Math.cos((57 * Math.PI) / 180), gyro: { tilt: 9, tiltV: 2, fold: 0, fade: '-x', fadeMin: -1, fadeMax: 1 } });
+  half.name = 'Half';
+  p.layers.push(half);
+  const z = await readZip(await buildTendies(p, render));
+  const caml = text(z.get([...z.keys()].find((n) => n.endsWith('main.caml'))));
+  const iT = caml.indexOf('<CATransformLayer id="' + half.id + '-tilt" name="Half Tilt"');
+  const iL = caml.indexOf('<CALayer id="' + half.id + '"');
+  assert(iT > 0 && iT < iL, 'tilt transform layer wraps the layer');
+  assert(caml.includes('transform="rotate(-57deg, 0, 1, 0) scale(1.8361, 1, 1)"') || /rotate\(-57deg, 0, 1, 0\) scale\(1\.83\d*, 1, 1\)/.test(caml), 'pre-rotation + width compensation');
+  assert(caml.includes('<mapMaxTo type="real" value="0.0349"/>') || caml.includes('value="0.034907'), 'vertical tilt amplitude');
+  assert(!caml.includes('sublayerTransform="perspective('), 'perspective 0 = orthographic');
+}
+
+// --- raw morph: Apple-style package (CATransformLayer groups, HEIC) keeps everything, adds overlays
+{
+  const enc = new TextEncoder();
+  const base = 'descriptors/Marble/versions/0/contents/7960.Marble.wallpaper/';
+  const caml = `<?xml version="1.0" encoding="UTF-8"?><caml xmlns="http://www.apple.com/CoreAnimation/1.0"><CALayer bounds="5.5 0 2412 5244" name="Root Layer" position="1206 2622"><sublayers><CATransformLayer id="BACKGROUND" anchorPoint="0 0" bounds="0 0 0 0" name="BACKGROUND" position="1206 2622"><sublayers><CATransformLayer name="_RIGHT_GYRO_TRANSFORM_1"><sublayers><CALayer anchorPoint="0 0.5" bounds="0 0 1340 5410" transform="rotate(-11.5deg, 0, 1, 0) scale(1.021, 1, 1)"><contents type="CGImage" src="assets/Level-1-right.HEIC"/></CALayer></sublayers></CATransformLayer></sublayers></CATransformLayer><CATransformLayer id="FLOATING" bounds="0 0 0 0" name="FLOATING" position="1206 2622"/></sublayers></CALayer></caml>`;
+  const pkg = createZip([
+    { path: base + 'Wallpaper.plist', data: toBinaryPlist({ assets: { lockAndHome: { default: { type: 'ParameterizedCA', assetFileName: 'wallpaper.ca' } } } }) },
+    { path: base + 'wallpaper.ca/main.caml', data: enc.encode(caml) },
+    { path: base + 'wallpaper.ca/assets/Level-1-right.HEIC', data: PNG },
+  ]);
+  assert.equal(await prefersRawMorph(pkg), true, 'Apple package prefers raw morph');
+  const r = await rawMorph(pkg, ['fx-snow', 'vignette'], { particle: async () => PNG, vignette: async () => PNG });
+  const z = await readZip(r.zip);
+  const out = text(z.get(base + 'wallpaper.ca/main.caml'));
+  assert.equal(r.changed, 2);
+  assert(out.includes('name="_RIGHT_GYRO_TRANSFORM_1"') && out.includes('src="assets/Level-1-right.HEIC"'), 'original rig kept');
+  assert(/<CATransformLayer id="FLOATING"[^>]*><sublayers><CALayer id="morph-snow"/.test(out), 'snow goes into FLOATING');
+  assert(out.includes('<CAEmitterLayer') && out.includes('morph-vignette'));
+  assert(z.has(base + 'wallpaper.ca/assets/morph-snow.png') && z.has(base + 'wallpaper.ca/assets/Level-1-right.HEIC'));
+  // our own exports are not "raw"
+  const own = await buildTendies(makeProject('modern').p, render);
+  assert.equal(await prefersRawMorph(own), false, 'own exports stay editable');
+  // system-rendered (MercuryPoster) descriptors
+  const sys = createZip([{ path: 'Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/X/com.apple.posterkit.provider.descriptor.identifier', data: enc.encode('x') }]);
+  await assert.rejects(() => rawMorph(sys, ['fx-snow'], {}), (e) => e.code === 'system_only');
 }
 console.log('OK');

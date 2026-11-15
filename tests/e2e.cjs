@@ -69,6 +69,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await pg.click('.chip:has-text("Dim in Always-On")');
   await pg.click('[data-anim="float"]');
   await pg.click('[data-anim="spin"]');
+  await pg.waitForTimeout(300); // panel re-renders on the next animation frame
   await pg.locator('.section:has-text("Gyro") .field:has-text("Move") input.num').fill('14');
   await pg.locator('.section:has-text("Gyro") .field:has-text("3D tilt") input.num').fill('12');
   let p = await project();
@@ -140,18 +141,42 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   // effects: Duo fold on the 3D photo project
   await pg.click('[data-add="effects"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.fx === 'duotilt' && x.gyro.tilt > 0), null, { timeout: 60000 });
+  await pg.waitForFunction(() => { const L = window.__studio.store.project.layers.filter((x) => x.fx === 'duotilt'); return L.length === 5 && L.filter((x) => x.gyro.tilt > 0 && x.sx > 1 && Math.abs(x.rotY) > 30).length === 4 && window.__studio.store.project.perspective === 0; }, null, { timeout: 60000 });
   // turn it off again → the original layers come back
   await pg.click('[data-add="effects"]');
   await pg.click('.fx[data-fx="duotilt"]');
   await pg.click('.fx[data-fx="duo"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => { const p = window.__studio.store.project; return !p.layers.some((x) => x.fx === 'duotilt') && p.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0) && p.layers.filter((x) => !x.fx).every((x) => !x.hidden); }, null, { timeout: 60000 });
+  await pg.waitForFunction(() => { const p = window.__studio.store.project; return !p.layers.some((x) => x.fx === 'duotilt') && p.perspective > 0 && p.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0) && p.layers.filter((x) => !x.fx).every((x) => !x.hidden); }, null, { timeout: 60000 });
   // Duo template + postures
   await pg.click('#libBtn');
   await pg.click('.tpl[data-tpl="duo3d"]');
   for (const v of ['cover', 'land', 'inner']) await pg.click(`.seg.posture .seg-btn[data-v="${v}"]`);
   assert.equal(ipic.blend, 'screenBlendMode', 'blend survives');
+
+  // raw morph of an Apple-style wallpaper (3D rig + HEIC): kept as is, snow added
+  await pg.evaluate(async () => {
+    const { createZip } = await import('/src/core/zip.js');
+    const { toBinaryPlist } = await import('/src/core/bplist.js');
+    const enc = new TextEncoder();
+    const base = 'descriptors/M/versions/0/contents/7960.Marble.wallpaper/';
+    const caml = '<?xml version="1.0"?><caml xmlns="http://www.apple.com/CoreAnimation/1.0"><CALayer bounds="0 0 2412 5244" name="Root Layer" position="1206 2622"><sublayers><CATransformLayer id="BACKGROUND" bounds="0 0 0 0" name="BACKGROUND" position="1206 2622"><sublayers><CATransformLayer name="_GYRO"/></sublayers></CATransformLayer><CATransformLayer id="FLOATING" bounds="0 0 0 0" name="FLOATING" position="1206 2622"/></sublayers></CALayer></caml>';
+    const bytes = createZip([
+      { path: base + 'Wallpaper.plist', data: toBinaryPlist({ assets: { lockAndHome: { default: { type: 'ParameterizedCA' } } } }) },
+      { path: base + 'wallpaper.ca/main.caml', data: enc.encode(caml) },
+      { path: base + 'wallpaper.ca/assets/a.HEIC', data: new Uint8Array(8) },
+    ]);
+    const a = await import('/src/app/actions.js');
+    a.rawMorphFlow([{ name: 'Marble', bytes }]);
+  });
+  await pg.waitForSelector('.modal .fx[data-fx="fx-snow"].on');
+  assert.equal(await pg.locator('.modal .fx[data-fx="duotilt"]').count(), 0, 'raw morph offers overlay effects only');
+  const rdl = pg.waitForEvent('download');
+  await pg.click('.modal-actions button:has-text("Morph & export")');
+  const rfile = path.join(OUT, 'raw-morph.tendies');
+  await (await rdl).saveAs(rfile);
+  const rbuf = fs.readFileSync(rfile);
+  assert(rbuf.includes(Buffer.from('morph-snow')) && rbuf.includes(Buffer.from('a.HEIC')), 'raw morph output keeps HEIC and adds snow');
 
   assert.deepEqual(errors, []);
   console.log('E2E OK →', OUT);

@@ -54,7 +54,7 @@ export function uniqueNames(layers) {
     let base = String(l.name || l.kind).replace(/[^\w \-.]+/g, '').trim() || l.kind;
     let n = base;
     let i = 2;
-    const SUFFIXES = ['', ' Parallax', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
+    const SUFFIXES = ['', ' Parallax', ' Parallax 2', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
     while (SUFFIXES.some((x) => used.has(n + x))) n = `${base} ${i++}`;
     for (const x of SUFFIXES) used.add(n + x);
     map.set(l.id, n);
@@ -178,19 +178,21 @@ function filtersXml(layer, ind) {
 }
 
 /** transform attribute for static rotation / scale (CAPlayground syntax). */
-function transformAttr(rotation, scale, rotX = 0, rotY = 0) {
+function transformAttr(rotation, scale, rotX = 0, rotY = 0, sx = 1) {
   const parts = [];
   if (rotation) parts.push(`rotate(${num(-rotation)}deg)`);
   if (rotY) parts.push(`rotate(${num(rotY)}deg, 0, 1, 0)`);
   if (rotX) parts.push(`rotate(${num(-rotX)}deg, 1, 0, 0)`);
-  if (scale != null && scale !== 1) parts.push(`scale(${num(scale)}, ${num(scale)}, 1)`);
+  const sc = scale ?? 1;
+  if (sc !== 1 || sx !== 1) parts.push(`scale(${num(sc * sx)}, ${num(sc)}, 1)`);
   return parts.length ? ` transform="${parts.join(' ')}"` : '';
 }
 
 /**
  * One editor layer → CAML subtree:
- *   [CATransformLayer "<name> Parallax"]          gyro (modern only)
- *     CALayer "<name>"  (id = layer.id)            geometry, opacity, state values, blend, filters
+ *   [CATransformLayer "<name> Parallax"]          gyro translation (modern only)
+ *     [CATransformLayer "<name> Tilt"]             gyro rotation / fold around the layer's anchor
+ *       CALayer "<name>"  (id = layer.id)          geometry, opacity, state values, blend, filters
  *       CALayer "<name> Anim n" …                  one nesting level per animation
  *         content (image / frames / emitter / glass)
  */
@@ -206,19 +208,32 @@ export function layerXml(layer, res, ctx, ind = '      ') {
     lines.push('\t'.repeat(depth) + s);
   };
   const pad = () => ind + '\t'.repeat(depth);
-  const wantsParallax = ctx.format !== 'classic' && layer.parallax > 0;
-  if (wantsParallax) {
-    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-px" name="${esc(name)} Parallax" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
+  // gyro translation wrappers: "<name> Parallax" (x→x, y→y) and "<name> Parallax 2" (cross terms x→y, y→x)
+  const g = gyroTranslations(layer);
+  const pxWrappers = ctx.format === 'classic' ? [] : [g.main.x || g.main.y ? 'Parallax' : null, g.cross.x || g.cross.y ? 'Parallax 2' : null].filter(Boolean);
+  const wantsParallax = pxWrappers.length > 0;
+  for (const w of pxWrappers) {
+    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-${w === 'Parallax' ? 'px' : 'px2'}" name="${esc(name)} ${w}" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
+    depth++;
+    lines.push(`${pad()}<sublayers>`);
+    depth++;
+  }
+  // gyro tilt / fold: a CATransformLayer OUTSIDE the layer (like Apple's _GYRO_TRANSFORM rigs).
+  // Inside a plain CALayer the rotation would be flattened before the layer's own 3D
+  // transform applies – that made the old tilt invisible. Pivot = the layer's anchor.
+  const tilted = usesGyro(ctx) && (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0);
+  if (tilted) {
+    const X = caStateValue('x', base.x, H, layer);
+    const Y = caStateValue('y', base.y, H, layer);
+    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-tilt" name="${esc(name)} Tilt" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" anchorPoint="${num(X / ctx.W)} ${num(Y / ctx.H)}" position="${num(X)} ${num(Y)}" ${COMMON}>`);
     depth++;
     lines.push(`${pad()}<sublayers>`);
     depth++;
   }
   const fast = fastFadeActive(layer, ctx);
   const outerOpacity = fast ? Math.sqrt(Math.max(0, base.opacity)) : base.opacity;
-  // a layer whose content folds / tilts needs its own perspective, otherwise CALayer flattens the 3D
-  const ownPersp = usesGyro(ctx) && (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0) ? ` sublayerTransform="perspective(${num(ctx.perspective || 900)})"` : '';
   lines.push(
-    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}"${anchorAttr(layer)}${ownPersp} position="${num(caStateValue('x', base.x, H, layer))} ${num(caStateValue('y', base.y, H, layer))}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
+    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}"${anchorAttr(layer)} position="${num(caStateValue('x', base.x, H, layer))} ${num(caStateValue('y', base.y, H, layer))}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY, layer.sx || 1)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
   );
   depth++;
   const fx = filtersXml(layer, pad());
@@ -283,12 +298,19 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   }
   depth--;
   lines.push(`${pad()}</CALayer>`);
-  if (wantsParallax) {
+  if (tilted) {
     depth--;
     lines.push(`${pad()}</sublayers>`);
     depth--;
     lines.push(`${pad()}</CATransformLayer>`);
   }
+  for (let i = 0; i < pxWrappers.length; i++) {
+    depth--;
+    lines.push(`${pad()}</sublayers>`);
+    depth--;
+    lines.push(`${pad()}</CATransformLayer>`);
+  }
+  void wantsParallax;
   void open;
   return lines.join('\n');
 }
@@ -314,7 +336,6 @@ function fastFadeActive(layer, ctx) {
 function wrapperSpecs(layer, ctx, name, base) {
   const out = [];
   if (fastFadeActive(layer, ctx)) out.push({ suffix: 'ff', name: `${name} Fade`, attrs: ` opacity="${num(Math.sqrt(Math.max(0, base.opacity)))}"` });
-  if (usesGyro(ctx) && (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0)) out.push({ suffix: 'tilt', name: `${name} Tilt`, pivot: true });
   if (usesGyro(ctx) && layer.gyro?.fade && layer.gyro.fade !== 'none') out.push({ suffix: 'gf', name: `${name} GyroFade` });
   return out;
 }
@@ -338,14 +359,38 @@ export function layerPropertyGroups(layer, name, H) {
 }
 
 /** gyro groups of one layer: [{name, axis, keyPath, min, max, type}] */
+/**
+ * Gyro translation amounts (pt per full tilt). main.x: tilt x → move x, main.y: tilt y → move y
+ * (the device-verified kind); cross.x: tilt x → move y, cross.y: tilt y → move x.
+ * Built from `parallax` (both axes) plus `gyroMoves` [{axis, key, n}] – n may be negative.
+ */
+export function gyroTranslations(layer) {
+  const n0 = layer.parallax || 0;
+  const main = { x: n0, y: n0 };
+  const cross = { x: 0, y: 0 };
+  for (const m of layer.gyroMoves || []) {
+    if (m.axis === m.key) main[m.axis] += m.n;
+    else cross[m.axis] += m.n;
+  }
+  for (const o of [main, cross]) for (const k of ['x', 'y']) o[k] = Math.round(o[k]);
+  return { main, cross };
+}
+
 export function layerGyroGroups(layer, name) {
   const out = [];
-  const n = Math.round(layer.parallax || 0);
-  if (n > 0) for (const axis of ['x', 'y']) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -n, max: n, type: 'integer' });
+  const { main, cross } = gyroTranslations(layer);
+  for (const axis of ['x', 'y']) {
+    if (main[axis]) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -main[axis], max: main[axis], type: 'integer' });
+  }
+  for (const axis of ['x', 'y']) {
+    const key = axis === 'x' ? 'y' : 'x';
+    if (cross[axis]) out.push({ name: `${name} Parallax 2`, axis, keyPath: `transform.translation.${key}`, min: -cross[axis], max: cross[axis], type: 'integer' });
+  }
   const t = layer.gyro?.tilt || 0;
   if (t > 0) {
     out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: -t * DEG, max: t * DEG, type: 'real' });
-    out.push({ name: `${name} Tilt`, axis: 'y', keyPath: 'transform.rotation.x', min: -t * DEG, max: t * DEG, type: 'real' });
+    const tv = layer.gyro.tiltV ?? t;
+    if (tv > 0) out.push({ name: `${name} Tilt`, axis: 'y', keyPath: 'transform.rotation.x', min: -tv * DEG, max: tv * DEG, type: 'real' });
   }
   const fold = layer.gyro?.fold || 0;
   if (fold > 0) out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: 0, max: fold * DEG, type: 'real' });
@@ -362,7 +407,7 @@ export function layerGyroGroups(layer, name) {
 }
 
 const perspectiveAttr = (project, layers) =>
-  layers.some((l) => l.rotX || l.rotY || l.gyro?.tilt > 0 || Object.values(l.states || {}).some((s) => 'rotX' in s || 'rotY' in s))
+  project.perspective !== 0 && layers.some((l) => l.rotX || l.rotY || l.gyro?.tilt > 0 || l.gyro?.fold > 0 || Object.values(l.states || {}).some((s) => 'rotX' in s || 'rotY' in s))
     ? ` sublayerTransform="perspective(${num(project.perspective || 900)})"`
     : '';
 
