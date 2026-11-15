@@ -146,4 +146,15 @@ assert.equal(old.layers[0].anims[0].preset, 'spin');
   assert(caml.includes('value="transform.rotation.y"') && caml.includes('<mapMaxTo type="real" value="1.0472"/>'), 'fold gyro 60°');
   assert(caml.includes('sublayerTransform="perspective('), 'own perspective');
 }
+
+// --- gyro translation incl. cross terms (Duo 3D tilt tiles)
+{
+  const p = newProject();
+  p.layers.push(newLayer('color', p, { gyroMoves: [{ axis: 'x', key: 'x', n: -30 }, { axis: 'x', key: 'y', n: 12 }, { axis: 'y', key: 'x', n: 12 }] }));
+  const z = await readZip(await buildTendies(p, render));
+  const caml = text(z.get([...z.keys()].find((n) => n.endsWith('main.caml'))));
+  assert(caml.includes('name="Color Parallax"') && caml.includes('name="Color Parallax 2"'), 'two parallax wrappers');
+  assert(caml.includes('<mapMaxTo type="integer" value="-30"/>'), 'negative main move');
+  assert(/<axis type="string" value="x"\/>\s*<image type="string" value="null"\/>\s*<keyPath type="string" value="transform.translation.y"\/>/.test(caml), 'cross term x→y');
+}
 console.log('OK');

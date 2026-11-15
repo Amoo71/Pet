@@ -184,6 +184,7 @@ export function newLayer(kind, project, props = {}) {
     anims: [],
     parallax: 0,
     anchor: { x: 0.5, y: 0.5 }, // rotation / scale pivot (0..1 of the layer box, y down)
+    gyroMoves: [], // extra gyro translations [{axis:'x'|'y', key:'x'|'y', n}] (pt per full tilt)
     gyro: { ...DEFAULT_GYRO },
     fastFade: false,
     blend: 'normal',
@@ -287,7 +288,7 @@ export function animatedProps(layer, appearanceAware) {
   return [...props].filter((p) => ANIMATABLE.some((a) => a.id === p));
 }
 
-export const isGyro = (layer) => layer.parallax > 0 || layer.gyro?.tilt > 0 || layer.gyro?.fold > 0 || (layer.gyro?.fade && layer.gyro.fade !== 'none');
+export const isGyro = (layer) => layer.parallax > 0 || (layer.gyroMoves || []).length > 0 || layer.gyro?.tilt > 0 || layer.gyro?.fold > 0 || (layer.gyro?.fade && layer.gyro.fade !== 'none');
 
 export const hasLoops = (layer) => (layer.anims || []).some((a) => a.enabled !== false && a.repeat !== 'once') || layer.kind === 'emitter' || (layer.kind === 'video' && (layer.video?.frames?.length || 0) > 1);
 

@@ -69,6 +69,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await pg.click('.chip:has-text("Dim in Always-On")');
   await pg.click('[data-anim="float"]');
   await pg.click('[data-anim="spin"]');
+  await pg.waitForTimeout(300); // panel re-renders on the next animation frame
   await pg.locator('.section:has-text("Gyro") .field:has-text("Move") input.num').fill('14');
   await pg.locator('.section:has-text("Gyro") .field:has-text("3D tilt") input.num').fill('12');
   let p = await project();
@@ -140,7 +141,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   // effects: Duo fold on the 3D photo project
   await pg.click('[data-add="effects"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.fx === 'duotilt' && x.gyro.tilt > 0), null, { timeout: 60000 });
+  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.fx === 'duotilt' && (x.gyroMoves || []).length > 0), null, { timeout: 60000 });
   // turn it off again → the original layers come back
   await pg.click('[data-add="effects"]');
   await pg.click('.fx[data-fx="duotilt"]');

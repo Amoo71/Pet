@@ -632,8 +632,18 @@ export function playUnlockDemo() {
 /** gyro move (parallax wrapper), 3D tilt and fade (applied to the content chain root) */
 function applyGyro(l, n, p) {
   const on = p.format !== 'classic';
-  const N = on ? l.parallax || 0 : 0;
-  n.px.style.transform = N ? `translate(${live.tiltX * N}px, ${live.tiltY * N}px)` : '';
+  // same mapping as the export: main (x→x, y→y) + cross (x→y, y→x) translations
+  let mx = 0, my = 0, cx = 0, cy = 0;
+  if (on) {
+    mx = my = l.parallax || 0;
+    for (const m of l.gyroMoves || []) {
+      if (m.axis === m.key) m.axis === 'x' ? (mx += m.n) : (my += m.n);
+      else m.axis === 'x' ? (cx += m.n) : (cy += m.n);
+    }
+  }
+  const tx = live.tiltX * mx + live.tiltY * cy;
+  const ty = live.tiltY * my + live.tiltX * cx;
+  n.px.style.transform = tx || ty ? `translate(${tx}px, ${ty}px)` : '';
   const g = on ? l.gyro || {} : {};
   const first = n.gy;
   if (!first) return;

@@ -54,7 +54,7 @@ export function uniqueNames(layers) {
     let base = String(l.name || l.kind).replace(/[^\w \-.]+/g, '').trim() || l.kind;
     let n = base;
     let i = 2;
-    const SUFFIXES = ['', ' Parallax', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
+    const SUFFIXES = ['', ' Parallax', ' Parallax 2', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
     while (SUFFIXES.some((x) => used.has(n + x))) n = `${base} ${i++}`;
     for (const x of SUFFIXES) used.add(n + x);
     map.set(l.id, n);
@@ -206,9 +206,12 @@ export function layerXml(layer, res, ctx, ind = '      ') {
     lines.push('\t'.repeat(depth) + s);
   };
   const pad = () => ind + '\t'.repeat(depth);
-  const wantsParallax = ctx.format !== 'classic' && layer.parallax > 0;
-  if (wantsParallax) {
-    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-px" name="${esc(name)} Parallax" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
+  // gyro translation wrappers: "<name> Parallax" (x→x, y→y) and "<name> Parallax 2" (cross terms x→y, y→x)
+  const g = gyroTranslations(layer);
+  const pxWrappers = ctx.format === 'classic' ? [] : [g.main.x || g.main.y ? 'Parallax' : null, g.cross.x || g.cross.y ? 'Parallax 2' : null].filter(Boolean);
+  const wantsParallax = pxWrappers.length > 0;
+  for (const w of pxWrappers) {
+    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-${w === 'Parallax' ? 'px' : 'px2'}" name="${esc(name)} ${w}" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
     depth++;
     lines.push(`${pad()}<sublayers>`);
     depth++;
@@ -283,12 +286,13 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   }
   depth--;
   lines.push(`${pad()}</CALayer>`);
-  if (wantsParallax) {
+  for (let i = 0; i < pxWrappers.length; i++) {
     depth--;
     lines.push(`${pad()}</sublayers>`);
     depth--;
     lines.push(`${pad()}</CATransformLayer>`);
   }
+  void wantsParallax;
   void open;
   return lines.join('\n');
 }
@@ -338,10 +342,33 @@ export function layerPropertyGroups(layer, name, H) {
 }
 
 /** gyro groups of one layer: [{name, axis, keyPath, min, max, type}] */
+/**
+ * Gyro translation amounts (pt per full tilt). main.x: tilt x → move x, main.y: tilt y → move y
+ * (the device-verified kind); cross.x: tilt x → move y, cross.y: tilt y → move x.
+ * Built from `parallax` (both axes) plus `gyroMoves` [{axis, key, n}] – n may be negative.
+ */
+export function gyroTranslations(layer) {
+  const n0 = layer.parallax || 0;
+  const main = { x: n0, y: n0 };
+  const cross = { x: 0, y: 0 };
+  for (const m of layer.gyroMoves || []) {
+    if (m.axis === m.key) main[m.axis] += m.n;
+    else cross[m.axis] += m.n;
+  }
+  for (const o of [main, cross]) for (const k of ['x', 'y']) o[k] = Math.round(o[k]);
+  return { main, cross };
+}
+
 export function layerGyroGroups(layer, name) {
   const out = [];
-  const n = Math.round(layer.parallax || 0);
-  if (n > 0) for (const axis of ['x', 'y']) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -n, max: n, type: 'integer' });
+  const { main, cross } = gyroTranslations(layer);
+  for (const axis of ['x', 'y']) {
+    if (main[axis]) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -main[axis], max: main[axis], type: 'integer' });
+  }
+  for (const axis of ['x', 'y']) {
+    const key = axis === 'x' ? 'y' : 'x';
+    if (cross[axis]) out.push({ name: `${name} Parallax 2`, axis, keyPath: `transform.translation.${key}`, min: -cross[axis], max: cross[axis], type: 'integer' });
+  }
   const t = layer.gyro?.tilt || 0;
   if (t > 0) {
     out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: -t * DEG, max: t * DEG, type: 'real' });
