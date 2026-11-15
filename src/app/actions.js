@@ -397,6 +397,89 @@ export function changeDevice(id) {
   });
 }
 
+// ---------------------------------------------------------------- 3D photo (depth layers + gyro)
+
+export async function add3DPhoto() {
+  const [file] = await pickFiles('image/*');
+  if (!file) return;
+  const opts = { mode: 'ai', layers: 4, strength: 28, tilt: 6, front: true, zoom: true, replace: true };
+  const modeSeg = segmented([['ai', 'AI (best)'], ['simple', 'Simple (offline)']], () => opts.mode, (v) => {
+    opts.mode = v;
+    modeSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  });
+  const body = el('div', { class: 'form' }, [
+    el('p', {}, 'Splits your picture into depth layers. Tilting the iPhone moves near layers more than far ones – the iPhone Duo style 3D depth effect.'),
+    el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Depth from'), modeSeg]),
+    el('p', { class: 'muted' }, 'AI downloads a ~27 MB depth model once (Depth Anything v2, runs on your device). Simple works offline: lower = nearer.'),
+    numField('Layers', () => opts.layers, (v) => (opts.layers = Math.max(2, Math.min(6, Math.round(v)))), { min: 2, max: 6, step: 1, slider: true }),
+    numField('Depth strength', () => opts.strength, (v) => (opts.strength = v), { min: 6, max: 60, step: 1, slider: true, unit: 'pt' }),
+    numField('3D tilt', () => opts.tilt, (v) => (opts.tilt = v), { min: 0, max: 20, step: 1, slider: true, unit: '°' }),
+    toggleField('Subject in front of clock', () => opts.front, (v) => (opts.front = v), 'Nearest layer goes above the clock (depth effect)'),
+    toggleField('Zoom on unlock', () => opts.zoom, (v) => (opts.zoom = v), 'Background pushes in, subject settles while you swipe'),
+    toggleField('Replace current layers', () => opts.replace, (v) => (opts.replace = v)),
+  ]);
+  const go = await new Promise((resolve) => modal('3D photo', body, [['Cancel', (c) => (c(), resolve(false))], ['Create 3D layers', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
+  const pm = progressModal('Building 3D layers…');
+  try {
+    const { blobToImage } = await import('../browser/raster.js');
+    const depthMod = await import('../browser/depth.js');
+    const { blob } = await (await import('../browser/raster.js')).normaliseImage(file, { maxPx: 2400 });
+    const img = await blobToImage(blob);
+    let dm;
+    if (opts.mode === 'ai') {
+      try {
+        dm = await depthMod.aiDepth(img, (f, t) => pm.set(f, 1, t));
+      } catch (e) {
+        console.warn('AI depth failed', e);
+        toast('AI depth model couldn’t load here – using the simple depth instead.', 'warn', 6000);
+      }
+    }
+    if (!dm) dm = depthMod.simpleDepth(256, Math.round((256 * img.height) / img.width));
+    pm.set(0, opts.layers, 'Slicing layers…');
+    const slices = await depthMod.sliceByDepth(img, dm, opts.layers);
+    const { canvasToBlob } = await import('../browser/raster.js');
+    const p = store.project;
+    const N = opts.strength;
+    const k = Math.max(p._w / img.width, p._h / img.height);
+    const newLayers = [];
+    for (let i = 0; i < slices.length; i++) {
+      const s = slices[i];
+      pm.set(i + 1, slices.length, `Saving layer ${i + 1} of ${slices.length}`);
+      const b = await canvasToBlob(s.canvas, i === 0 ? 'image/jpeg' : 'image/png', 0.9);
+      const id = await addAsset(b, { w: s.canvas.width, h: s.canvas.height });
+      const par = Math.round(N * (0.15 + 0.85 * s.depthRank));
+      const bleed = 1 + (2 * par + 8) / Math.min(p._w, p._h);
+      const near = i === slices.length - 1;
+      const l = newLayer('image', p, {
+        asset: id,
+        name: i === 0 ? '3D background' : near ? '3D subject' : `3D depth ${i}`,
+        w: Math.round(img.width * k * bleed),
+        h: Math.round(img.height * k * bleed),
+        fit: 'cover',
+        plane: near && opts.front ? 'floating' : 'background',
+        parallax: par,
+        gyro: { tilt: Math.round(opts.tilt * s.depthRank), fade: 'none', fadeMin: 0, fadeMax: 1 },
+        states: opts.zoom ? { Unlock: { scale: i === 0 ? 1.08 : 1 + 0.04 * (1 - s.depthRank) }, Sleep: { scale: 0.97 } } : {},
+      });
+      newLayers.push(l);
+    }
+    update((proj) => {
+      if (opts.replace) proj.layers = [];
+      proj.layers.push(...newLayers);
+      if (proj.format === 'classic') proj.format = 'modern';
+      if (!proj.name || /^(New wallpaper|My Wallpaper)$/.test(proj.name)) proj.name = file.name.replace(/\.[^.]+$/, '').slice(0, 30) || '3D photo';
+    });
+    select(newLayers.at(-1).id);
+    pm.close();
+    toast('3D layers ready – switch to ▶ Preview and move the mouse (or 🧭 Motion on iPhone) to tilt.', 'ok', 7000);
+  } catch (e) {
+    console.error(e);
+    pm.close();
+    toast(`3D photo failed: ${e.message}`, 'error', 6000);
+  }
+}
+
 export function setFormat(v) {
   const p = store.project;
   if (p.format === v) return;

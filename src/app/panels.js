@@ -56,6 +56,7 @@ const iconBtn = (t, label, fn, cls = '') => el('button', { type: 'button', class
 // ---------------------------------------------------------------- Layers
 
 export const ADD = [
+  ['photo3d', '🧊', '3D photo', () => A.add3DPhoto()],
   ['image', '🖼️', 'Image', () => A.addImages()],
   ['gif', '🔍', 'GIF search', () => A.openGifSearch()],
   ['video', '🎞️', 'Video', () => A.addVideo()],
