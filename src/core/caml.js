@@ -212,8 +212,15 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   const g = gyroTranslations(layer);
   const pxWrappers = ctx.format === 'classic' ? [] : [g.main.x || g.main.y ? 'Parallax' : null, g.cross.x || g.cross.y ? 'Parallax 2' : null].filter(Boolean);
   const wantsParallax = pxWrappers.length > 0;
+  // gyro drawing order: zPosition on the outermost element (rest value written statically)
+  let zLeft = usesGyro(ctx) && hasGyroZ(layer) ? ` zPosition="${num(gyroZRest(layer))}"` : '';
+  const z = () => {
+    const a = zLeft;
+    zLeft = '';
+    return a;
+  };
   for (const w of pxWrappers) {
-    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-${w === 'Parallax' ? 'px' : 'px2'}" name="${esc(name)} ${w}" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
+    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-${w === 'Parallax' ? 'px' : 'px2'}" name="${esc(name)} ${w}" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}"${z()} ${COMMON}>`);
     depth++;
     lines.push(`${pad()}<sublayers>`);
     depth++;
@@ -225,7 +232,7 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   if (tilted) {
     const X = caStateValue('x', base.x, H, layer);
     const Y = caStateValue('y', base.y, H, layer);
-    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-tilt" name="${esc(name)} Tilt" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" anchorPoint="${num(X / ctx.W)} ${num(Y / ctx.H)}" position="${num(X)} ${num(Y)}" ${COMMON}>`);
+    lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-tilt" name="${esc(name)} Tilt" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" anchorPoint="${num(X / ctx.W)} ${num(Y / ctx.H)}" position="${num(X)} ${num(Y)}"${z()} ${COMMON}>`);
     depth++;
     lines.push(`${pad()}<sublayers>`);
     depth++;
@@ -233,7 +240,7 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   const fast = fastFadeActive(layer, ctx);
   const outerOpacity = fast ? Math.sqrt(Math.max(0, base.opacity)) : base.opacity;
   lines.push(
-    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}"${anchorAttr(layer)} position="${num(caStateValue('x', base.x, H, layer))} ${num(caStateValue('y', base.y, H, layer))}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY, layer.sx || 1)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
+    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}"${anchorAttr(layer)}${z()} position="${num(caStateValue('x', base.x, H, layer))} ${num(caStateValue('y', base.y, H, layer))}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY, layer.sx || 1)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
   );
   depth++;
   const fx = filtersXml(layer, pad());
@@ -316,6 +323,16 @@ export function layerXml(layer, res, ctx, ind = '      ') {
 }
 
 const usesGyro = (ctx) => ctx.format === 'modern' || ctx.format === 'duo';
+const hasGyroZ = (layer) => layer.gyro && Number.isFinite(layer.gyro.zMin) && Number.isFinite(layer.gyro.zMax) && (layer.gyro.zMin || layer.gyro.zMax);
+const gyroZRest = (layer) => (layer.gyro.zMin + layer.gyro.zMax) / 2;
+/** the CAML name of a layer's outermost element (what a zPosition group must target) */
+function outermostName(layer, name) {
+  const { main, cross } = gyroTranslations(layer);
+  if (main.x || main.y) return `${name} Parallax`;
+  if (cross.x || cross.y) return `${name} Parallax 2`;
+  if (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0) return `${name} Tilt`;
+  return name;
+}
 
 /** anchorPoint attribute (CA is y-up, so the y component flips) */
 function anchorAttr(layer) {
@@ -336,7 +353,11 @@ function fastFadeActive(layer, ctx) {
 function wrapperSpecs(layer, ctx, name, base) {
   const out = [];
   if (fastFadeActive(layer, ctx)) out.push({ suffix: 'ff', name: `${name} Fade`, attrs: ` opacity="${num(Math.sqrt(Math.max(0, base.opacity)))}"` });
-  if (usesGyro(ctx) && layer.gyro?.fade && layer.gyro.fade !== 'none') out.push({ suffix: 'gf', name: `${name} GyroFade` });
+  if (usesGyro(ctx) && layer.gyro?.fade && layer.gyro.fade !== 'none') {
+    // rest value (phone level) written statically, so the layer is right even before / without gyro
+    const rest = Math.max(0, Math.min(1, ((layer.gyro.fadeMin ?? 0) + (layer.gyro.fadeMax ?? 1)) / 2));
+    out.push({ suffix: 'gf', name: `${name} GyroFade`, attrs: ` opacity="${num(rest)}"` });
+  }
   return out;
 }
 
@@ -394,6 +415,7 @@ export function layerGyroGroups(layer, name) {
   }
   const fold = layer.gyro?.fold || 0;
   if (fold > 0) out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: 0, max: fold * DEG, type: 'real' });
+  if (hasGyroZ(layer)) out.push({ name: outermostName(layer, name), axis: 'x', keyPath: 'zPosition', min: layer.gyro.zMin, max: layer.gyro.zMax, type: 'real' });
   const f = layer.gyro?.fade;
   if (f && f !== 'none') {
     const axis = f.replace('-', '');

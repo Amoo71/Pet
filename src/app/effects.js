@@ -15,7 +15,7 @@ import { makeCanvas, canvasToBlob } from '../browser/raster.js';
 const PARTICLES = ['snow', 'rain', 'sparkle', 'stars', 'bubbles', 'embers', 'petals', 'confetti'];
 
 export const EFFECTS = [
-  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'iPhone Duo look: the picture tilts back in 3D with the gyro, the far side blurs and darkens.' },
+  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'iPhone Duo look: the whole picture tips back with the gyro, the far side blurs and darkens.' },
   { id: 'duo', icon: '📖', name: 'Duo fold', desc: 'iPhone Duo fold: the left half folds on its hinge as you tilt (blur + shade follow).' },
   { id: 'depth', icon: '🧊', name: 'Depth parallax', desc: 'Gives every layer gyro parallax – back layers move less, front layers more.' },
   { id: 'unlockZoom', icon: '🔍', name: 'Unlock zoom', desc: 'Background pushes in while you swipe up.' },
@@ -25,7 +25,7 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 85, shade: 0.3, unlock: true, tilt: 24, strength: 44 };
+export const DUO_DEFAULTS = { angle: 60, blur: 85, shade: 0.3, unlock: true, tilt: 35, strength: 44 };
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -213,42 +213,53 @@ function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
 }
 
 /**
- * Duo 3D tilt – the iPhone Duo fold look, driven by the gyro.
- * Model (Mac-Duo's DepthGeometry): the whole picture is one plate hinged at the NEAR edge
- * that turns back in real perspective – the far side recedes into black, and blur +
- * dimming grow towards it. A plate can only have one hinge, so there are two:
- *   * "Duo R" – hinged on the left edge, turns its right side away (tilt right, +x),
- *   * "Duo L" – hinged on the right edge, turns its left side away (tilt left, −x).
- * Steep gyro fades switch between them around level (opacity = k·tilt, clamped), so at
- * rest the picture is flat and full-screen. Each plate has a far-edge copy whose opacity
- * follows the tilt. Black behind, like the Duo's panel edge.
+ * Duo 3D tilt – the iPhone Duo fold look, driven by the gyro, built ONLY from mechanisms
+ * seen working on device:
+ *   - gyro rotation on a CATransformLayer (Apple's iPhone 17 wallpapers),
+ *   - gyro zPosition = drawing order (Rubik's Cube / Geometry Dash community wallpapers),
+ *   - orthographic 3D (no community wallpaper uses perspective; Apple's is effectively off).
+ * Model (Mac-Duo): the whole picture is one plate hinged at the NEAR edge that turns back;
+ * the far side narrows away and black shows, blur + dimming grow towards the far edge.
+ *   * "Duo R" hinged on the left edge (tilt right, +x) and "Duo L" hinged on the right edge
+ *     (tilt left): gyro zPosition puts the active plate above a black layer (z 0) and the
+ *     other one below it – a clean switch with no opacity tricks;
+ *   * far-edge copies in two stages appear on top as the tilt grows (also by zPosition);
+ *   * every value has its resting state written statically (flat, sharp, full screen).
  */
 export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const W = project._w;
   const H = project._h;
   const scale = 2;
-  const tilt = Math.max(4, Math.min(45, o.tilt ?? 24));
+  const tilt = Math.max(4, Math.min(60, o.tilt ?? 35));
   const maxBlur = Math.max(0, o.blur ?? 85) * scale;
   const maxDim = Math.max(0, Math.min(1, o.shade ?? 0.3));
-  const K = 6; // switch steepness: plate fully on at |tilt| ≥ 1/K of the range
-  const kh = 1.03; // a little bleed above / below for the vertical tilt
+  const kh = 1.02;
   const src = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), scale);
   const PW = Math.round(W * scale);
   const PH = Math.round(H * kh * scale);
   const pic = makeCanvas(PW, PH);
   pic.getContext('2d').drawImage(src, 0, 0, PW, PH);
   const picAsset = await canvasAsset(pic, 'image/jpeg', 0.92);
+  // drawing order as a function of tilt t (−1…1): z = a·t + c  →  zMin = c − a, zMax = c + a
+  const K = 10; // plates
+  const K2 = 100; // far-edge stages (steeper, so they pass the plate at their threshold)
+  const EPS = 1;
+  const zr = (a, c) => ({ zMin: c - a, zMax: c + a });
+  const stageZ = (dir, tStar) => zr(dir * K2, -((K2 - K) * tStar - EPS)); // on top of the plate for dir·t > tStar
   const geo = (hinge) => ({ x: W / 2, y: H / 2, w: W, h: Math.round(H * kh), fit: 'stretch', plane: 'background', anchor: { x: hinge === 'left' ? 0 : 1, y: 0.5 } });
-  const gyro = (fade, lo, hi) => ({ tilt, tiltV: Math.round(tilt * 0.25), fold: 0, fade, fadeMin: lo, fadeMax: hi });
-  const layers = [
-    newLayer('color', project, { name: 'Duo backdrop', color: '#000000', plane: 'background' }),
-    // tilt left: hinge right, left side away. Visible for tilt ≤ 0 (opacity 1 − K·t)
-    newLayer('image', project, { ...geo('right'), name: 'Duo L', asset: picAsset, gyro: gyro('x', 1 + K, 1 - K) }),
-    newLayer('image', project, { ...geo('right'), name: 'Duo L far', asset: await canvasAsset(duoFarCopy(pic, 'left', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x', 1, -1) }),
-    // tilt right: hinge left, right side away. Visible for tilt > 0 (opacity K·t)
-    newLayer('image', project, { ...geo('left'), name: 'Duo R', asset: picAsset, gyro: gyro('x', -K, K) }),
-    newLayer('image', project, { ...geo('left'), name: 'Duo R far', asset: await canvasAsset(duoFarCopy(pic, 'right', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x', -1, 1) }),
+  const gy = (z) => ({ tilt, tiltV: 0, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1, ...z });
+  const STAGES = [
+    [0.2, 0.5],
+    [0.55, 1],
   ];
+  const layers = [newLayer('color', project, { name: 'Duo black', color: '#000000', plane: 'background' })];
+  for (const [side, hinge, dir] of [['R', 'left', 1], ['L', 'right', -1]]) {
+    layers.push(newLayer('image', project, { ...geo(hinge), name: `Duo ${side}`, asset: picAsset, gyro: gy(zr(dir * K, EPS)) }));
+    for (const [i, [tStar, amount]] of STAGES.entries()) {
+      const far = duoFarCopy(pic, side === 'R' ? 'right' : 'left', maxBlur * amount, maxDim * amount);
+      layers.push(newLayer('image', project, { ...geo(hinge), name: `Duo ${side} far ${i + 1}`, asset: await canvasAsset(far, 'image/jpeg', 0.9), gyro: gy(stageZ(dir, tStar)) }));
+    }
+  }
   if (o.unlock) for (const l of layers.slice(1)) l.states = { Sleep: { opacity: 0.6 } };
   return { layers, hideOthers: true };
 }
@@ -326,7 +337,7 @@ export async function prepareEffects(project, ids, opts = {}) {
         l.hidden = true;
       }
       p.layers.unshift(...added.duotilt);
-      // real perspective like the Duo (restored on removal)
+      // orthographic like on device (restored on removal)
       p.fxApplied.duotilt.__project = { perspective: p.perspective };
       done.push('+ Duo 3D tilt');
     }
@@ -337,7 +348,7 @@ export async function prepareEffects(project, ids, opts = {}) {
     }
     if (added.duo || added.duotilt) {
       if (p.format === 'classic') p.format = 'modern';
-      p.perspective = Math.min(p.perspective || 800, 800);
+      p.perspective = added.duotilt || (have.has('duotilt') && want.has('duotilt')) ? 0 : Math.min(p.perspective || 800, 800);
     }
     if (want.has('vignette') && !have.has('vignette')) {
       p.layers.push(Object.assign(newLayer('gradient', p, { name: 'Vignette', plane: 'floating', gradient: { type: 'radial', angle: 0, stops: [{ c: '#00000000', p: 0.55 }, { c: '#000000b3', p: 1 }] } }), { fx: 'vignette' }));

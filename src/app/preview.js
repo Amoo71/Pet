@@ -652,6 +652,11 @@ function applyGyro(l, n, p) {
   if (fold) parts.push(`rotateY(${((live.tiltX + 1) / 2) * fold}deg)`);
   if (t) parts.push(`rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * tv}deg)`);
   n.tl.style.transform = parts.join(' ');
+  // gyro drawing order (zPosition on device): higher = drawn on top
+  if (on && Number.isFinite(g.zMin) && Number.isFinite(g.zMax) && (g.zMin || g.zMax)) {
+    const zz = g.zMin + ((g.zMax - g.zMin) * (live.tiltX + 1)) / 2;
+    n.px.style.zIndex = String(Math.round(zz * 100));
+  } else n.px.style.zIndex = '';
   const first = n.gy;
   if (!first) return;
   if (g.fade && g.fade !== 'none') {
