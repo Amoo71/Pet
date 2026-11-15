@@ -24,7 +24,7 @@ Runs entirely in the browser as an installable web app (PWA): nothing to install
 
 ## Use it
 
-**Online:** enable GitHub Pages (repo → Settings → Pages → Source: *GitHub Actions*); every push to `main` deploys. On iPhone open it in Safari → Share → *Add to Home Screen*.
+**Online:** <https://amoo71.github.io/Pet/> (GitHub Pages, deployed from the `main` branch). On iPhone open it in Safari → Share → *Add to Home Screen*.
 
 **Locally:**
 
