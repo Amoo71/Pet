@@ -25,7 +25,7 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 55, shade: 0.6, unlock: true, tilt: 24, strength: 44 };
+export const DUO_DEFAULTS = { angle: 60, blur: 85, shade: 0.3, unlock: true, tilt: 24, strength: 44 };
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -155,16 +155,16 @@ export async function duoLayers(project, picture, o = DUO_DEFAULTS) {
  * The far-edge look of the iPhone Duo fold, as recreated 1:1 by Mac-Duo
  * (github.com/sumimakito/Mac-Duo, Apache-2.0 – DepthShaders / BlurGradient / DepthTuning):
  *   h      = 0 at the near edge … 1 at the far edge
- *   blur   = maxBlur · smoothstep(0.3, 1, h)^1.35   (Duo ^1.35 curve, only the outer part)
- *   colour = colour · (1 − maxDim · smoothstep(0.55, 1, h))^2.2   (Mac-Duo dimming)
+ *   blur   = maxBlur · smoothstep(0.15, 1, h)^1.35  (Duo ^1.35 curve), maxBlur 85 pt
+ *   colour = colour · (1 − maxDim · smoothstep(0.7, 1, h))^2.2    (Mac-Duo dimming), maxDim 0.3
  * Rendered as a bitmap whose far side is `far` ('left' | 'right').
  */
 function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
   const W = src.width;
   const H = src.height;
   // only the outer part of the far side blurs / darkens – the middle stays clear
-  const blurStart = o.blurStart ?? 0.3;
-  const dimStart = o.dimStart ?? 0.55;
+  const blurStart = o.blurStart ?? 0.15;
+  const dimStart = o.dimStart ?? 0.7;
   const smooth = (e0, e1, x) => {
     const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
     return t * t * (3 - 2 * t);
@@ -228,8 +228,8 @@ export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const H = project._h;
   const scale = 2;
   const tilt = Math.max(4, Math.min(45, o.tilt ?? 24));
-  const maxBlur = Math.max(0, o.blur ?? 55) * scale;
-  const maxDim = Math.max(0, Math.min(1, o.shade ?? 0.6));
+  const maxBlur = Math.max(0, o.blur ?? 85) * scale;
+  const maxDim = Math.max(0, Math.min(1, o.shade ?? 0.3));
   const K = 6; // switch steepness: plate fully on at |tilt| ≥ 1/K of the range
   const kh = 1.03; // a little bleed above / below for the vertical tilt
   const src = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), scale);
