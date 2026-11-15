@@ -25,7 +25,7 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 22, shade: 0.52, unlock: true, tilt: 12, strength: 44 };
+export const DUO_DEFAULTS = { angle: 60, blur: 30, shade: 0.52, unlock: true, tilt: 12, strength: 44 };
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -48,9 +48,8 @@ function progressiveBlur(src, radius) {
   const mask = makeCanvas(W, H);
   const m = mask.getContext('2d');
   const g = m.createLinearGradient(W, 0, 0, 0);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(0.35, 'rgba(0,0,0,0.35)');
-  g.addColorStop(1, 'rgba(0,0,0,1)');
+  // chuspeeism/iphone-duo inner screen: blur radius ∝ edge^1.35 (0 at the hinge → max at the outer edge)
+  for (let i = 0; i <= 10; i++) g.addColorStop(i / 10, `rgba(0,0,0,${Math.pow(i / 10, 1.35).toFixed(3)})`);
   m.fillStyle = g;
   m.fillRect(0, 0, W, H);
   b.globalCompositeOperation = 'destination-in';
@@ -170,9 +169,13 @@ function edgeBlurHalf(half, radius, outer, shade) {
   // shade: none at the centre line → `shade` at the outer edge
   const x = out.getContext('2d');
   const g = outer === 'left' ? x.createLinearGradient(W, 0, 0, 0) : x.createLinearGradient(0, 0, W, 0);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(0.4, `rgba(0,0,0,${shade * 0.25})`);
-  g.addColorStop(1, `rgba(0,0,0,${shade})`);
+  // darken like the Duo inner screen: starts at 20 %, min(1, 2·((e−0.2)/0.8)^1.35), scaled by `shade`
+  const k = Math.min(1.6, shade / 0.52);
+  for (let i = 0; i <= 10; i++) {
+    const e = i / 10;
+    const d = Math.max(0, (e - 0.2) / 0.8);
+    g.addColorStop(e, `rgba(0,0,0,${Math.min(0.92, Math.min(1, 2 * Math.pow(d, 1.35)) * 0.8 * k).toFixed(3)})`);
+  }
   x.fillStyle = g;
   x.fillRect(0, 0, W, H);
   return out;
