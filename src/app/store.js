@@ -16,6 +16,7 @@ export const store = {
     tab: 'layers',
     mode: 'edit', // edit | preview
     progress: 0, // 0 = Lock … 1 = Home (swipe scrub)
+    posture: 'inner', // iPhone Duo preview: cover | inner | land
     zoom: 0, // 0 = fit
   },
   undo: [],
@@ -49,7 +50,7 @@ export function flushSave() {
 }
 
 export function setProject(p) {
-  if ((p.v || 1) < 2) migrateProject(p);
+  if ((p.v || 1) < 3) migrateProject(p);
   const d = getDevice(p.device);
   p._w = d.w;
   p._h = d.h;

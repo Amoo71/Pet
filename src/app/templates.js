@@ -24,6 +24,30 @@ export const TEMPLATES = [
     },
   },
   {
+    id: 'duo3d',
+    icon: '📖',
+    name: 'Duo · Gyro 3D fade',
+    desc: 'iPhone Duo split screens: layered 3D scene that tilts with the gyro and fades away in depth when you unlock.',
+    build(p) {
+      p.name = 'Duo 3D fade';
+      p.format = 'duo';
+      p.device = 'iphone-duo';
+      p._w = 951;
+      p._h = 951;
+      p.perspective = 800;
+      const S = 951;
+      const C = S / 2;
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Deep space', w: S + 120, h: S + 120, gradient: radial(['#24125e', 0], ['#060312', 1]), parallax: 6, states: { Unlock: { scale: 1.06 }, Sleep: { opacity: 0.5 } } }),
+        newLayer('emitter', p, { name: 'Stars', plane: 'background', w: S, h: S, emitter: { preset: 'stars', ...EMITTER_PRESETS.stars }, parallax: 8, states: { Sleep: { opacity: 0 } } }),
+        newLayer('shape', p, { name: 'Ring far', plane: 'background', w: 620, h: 620, x: C, y: C + 40, rotX: 62, shape: { type: 'ring', fill: '#7c6cff', stroke: '#fff', strokeWidth: 6, points: 5, blur: 2 }, parallax: 10, gyro: { tilt: 14, fade: 'none', fadeMin: 0, fadeMax: 1 }, fastFade: true, states: { Unlock: { rotX: 80, scale: 1.4, opacity: 0 }, Sleep: { opacity: 0.35 } } }),
+        newLayer('shape', p, { name: 'Planet', plane: 'background', w: 300, h: 300, x: C, y: C + 40, shape: { type: 'ellipse', fill: '#36c5ff', stroke: '#fff', strokeWidth: 0, points: 5, blur: 1 }, parallax: 14, gyro: { tilt: 0, fade: 'none', fadeMin: 0, fadeMax: 1 }, states: { Unlock: { y: C + 260, scale: 0.7 }, Sleep: { y: C + 220, scale: 0.8 } } }),
+        newLayer('glass', p, { name: 'Glass shard', w: 300, h: 420, x: C + 150, y: C + 120, rotY: -28, cornerRadius: 40, glass: { mode: 'liquid', blur: 3, tint: '#ffffff', tintOpacity: 0.08, border: 0.6, saturation: 1.6, shine: 0.45, refraction: 90 }, parallax: 24, gyro: { tilt: 18, fade: '-x', fadeMin: 0.35, fadeMax: 1 }, fastFade: true, states: { Unlock: { rotY: -85, x: C + 420, opacity: 0 }, Sleep: { opacity: 0 } } }),
+        newLayer('text', p, { name: 'Title', w: 700, h: 120, x: C, y: C + 300, text: { content: 'D E P T H', font: 'ui-rounded, system-ui', weight: 800, size: 64, color: '#ffffff', align: 'center', lineHeight: 1, letterSpacing: 6, italic: false, shadow: 0.5, fontAsset: null }, parallax: 30, gyro: { tilt: 10, fade: 'none', fadeMin: 0, fadeMax: 1 }, fastFade: true, states: { Unlock: { rotX: 70, y: C + 380, opacity: 0 }, Sleep: { opacity: 0 } } })
+      );
+    },
+  },
+  {
     id: 'liquid',
     icon: '💧',
     name: 'Liquid Glass card',

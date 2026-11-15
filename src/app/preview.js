@@ -6,7 +6,7 @@
 // Classic format: the state switches when the swipe completes and springs (LKStateTransition).
 
 import { store, update, select, selectedLayer, subscribe, setView } from './store.js';
-import { effective, interpolate, stateKey, PLANES, BLEND_CSS } from '../core/model.js';
+import { effective, interpolate, stateKey, PLANES, BLEND_CSS, DUO } from '../core/model.js';
 import { layerBitmapURL, assetURL } from './assets.js';
 import { transitionCSS } from './spring.js';
 import { el } from './dom.js';
@@ -61,14 +61,29 @@ function layout() {
   if (!p || !stage) return;
   const r = stage.getBoundingClientRect();
   const pad = 28;
-  fitScale = Math.max(0.05, Math.min((r.width - pad) / p._w, (r.height - pad) / p._h));
+  // iPhone Duo: show one posture's crop of the square scene
+  const post = p.format === 'duo' ? DUO.postures[store.view.posture || 'inner'] : null;
+  const vw = post ? post.w : p._w;
+  const vh = post ? post.h : p._h;
+  fitScale = Math.max(0.05, Math.min((r.width - pad) / vw, (r.height - pad) / vh));
   const z = store.view.zoom || fitScale;
-  phone.style.width = `${p._w}px`;
-  phone.style.height = `${p._h}px`;
+  phone.style.width = `${vw}px`;
+  phone.style.height = `${vh}px`;
   phone.style.transform = `translate(-50%, -50%) scale(${z})`;
   phone.style.setProperty('--z', z);
-  phone.style.setProperty('--W', p._w);
-  phone.style.setProperty('--H', p._h);
+  phone.style.setProperty('--W', vw);
+  phone.style.setProperty('--H', vh);
+  phone.style.setProperty('--CW', Math.min(vw, vh * 0.62));
+  phone.classList.toggle('duo', !!post);
+  const ox = (vw - p._w) / 2;
+  const oy = (vh - p._h) / 2;
+  for (const el of [planesEl.background, planesEl.floating, overlay]) {
+    el.style.left = `${ox}px`;
+    el.style.top = `${oy}px`;
+    el.style.width = `${p._w}px`;
+    el.style.height = `${p._h}px`;
+    el.style.perspective = `${p.perspective || 900}px`;
+  }
 }
 
 export const currentScale = () => store.view.zoom || fitScale;
@@ -76,8 +91,17 @@ export const currentScale = () => store.view.zoom || fitScale;
 /** current interpolation: null = rest at view.state */
 function valuesFor(l, p) {
   const dark = p.appearanceAware && store.view.dark && p.format === 'classic';
-  if (live.u != null && p.format !== 'classic') return interpolate(l, live.from, live.to, live.u, dark);
-  if (store.view.progress > 0 && store.view.progress < 1 && p.format !== 'classic') return interpolate(l, 'Locked', 'Unlock', store.view.progress, dark);
+  const lerp = (u) => {
+    const v = interpolate(l, live.u != null ? live.from : 'Locked', live.u != null ? live.to : 'Unlock', u, dark);
+    if (l.fastFade) {
+      const a = Math.sqrt(Math.max(0, effective(l, live.u != null ? live.from : 'Locked', dark).opacity));
+      const b = Math.sqrt(Math.max(0, effective(l, live.u != null ? live.to : 'Unlock', dark).opacity));
+      v.opacity = (a + (b - a) * u) ** 2;
+    }
+    return v;
+  };
+  if (live.u != null && p.format !== 'classic') return lerp(live.u);
+  if (store.view.progress > 0 && store.view.progress < 1 && p.format !== 'classic') return lerp(store.view.progress);
   return effective(l, store.view.state, dark);
 }
 
@@ -151,7 +175,8 @@ function paintLayer(l, n, p, animate) {
   o.style.width = `${l.w}px`;
   o.style.height = `${l.h}px`;
   o.style.opacity = Math.max(0, Math.min(1, e.opacity));
-  o.style.transform = `rotate(${e.rotation}deg) scale(${e.scale})`;
+  o.style.transform = `rotate(${e.rotation}deg) rotateY(${e.rotY || 0}deg) rotateX(${e.rotX || 0}deg) scale(${e.scale})`;
+  o.style.transformStyle = e.rotX || e.rotY || l.gyro?.tilt ? 'preserve-3d' : '';
   o.style.borderRadius = l.cornerRadius ? `${l.cornerRadius}px` : '';
   o.style.overflow = l.cornerRadius ? 'hidden' : '';
   o.style.visibility = l.hidden ? 'hidden' : '';
@@ -165,9 +190,7 @@ function paintLayer(l, n, p, animate) {
   o.style.filter = filt.join(' ');
   o.classList.toggle('locked', !!l.locked);
   o.classList.toggle('selected', l.id === store.selection);
-  // gyro parallax
-  const N = p.format === 'classic' ? 0 : l.parallax || 0;
-  n.px.style.transform = N ? `translate(${live.tiltX * N}px, ${live.tiltY * N}px)` : '';
+  applyGyro(l, n, p);
 
   // glass
   const c = n.content;
@@ -206,8 +229,10 @@ function paintLayer(l, n, p, animate) {
     n.animSig = animSig;
     n.anims.forEach((a) => a.anim?.cancel());
     // rebuild nesting
-    let parent = o;
     o.innerHTML = '';
+    n.gy = el('div', { class: 'gy' });
+    o.append(n.gy);
+    let parent = n.gy;
     n.anims = [];
     for (const a of (l.anims || []).filter((x) => x.enabled !== false)) {
       const wrap = el('div', { class: 'anim' });
@@ -216,6 +241,7 @@ function paintLayer(l, n, p, animate) {
       parent = wrap;
     }
     parent.append(c);
+    applyGyro(l, n, p);
   }
 }
 
@@ -596,6 +622,26 @@ export function playUnlockDemo() {
 
 // ---------------------------------------------------------------- tilt / gyro
 
+/** gyro move (parallax wrapper), 3D tilt and fade (applied to the content chain root) */
+function applyGyro(l, n, p) {
+  const on = p.format !== 'classic';
+  const N = on ? l.parallax || 0 : 0;
+  n.px.style.transform = N ? `translate(${live.tiltX * N}px, ${live.tiltY * N}px)` : '';
+  const g = on ? l.gyro || {} : {};
+  const first = n.gy;
+  if (!first) return;
+  const t = g.tilt || 0;
+  first.style.transform = t ? `rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * t}deg)` : '';
+  if (g.fade && g.fade !== 'none') {
+    const axis = g.fade.replace('-', '');
+    let u = ((axis === 'x' ? live.tiltX : live.tiltY) + 1) / 2;
+    if (g.fade.startsWith('-')) u = 1 - u;
+    const lo = g.fadeMin ?? 0;
+    const hi = g.fadeMax ?? 1;
+    first.style.opacity = String(lo + (hi - lo) * u);
+  } else first.style.opacity = '';
+}
+
 let motionOn = false;
 function setTilt(x, y) {
   live.tiltX = Math.max(-1, Math.min(1, x));
@@ -604,8 +650,7 @@ function setTilt(x, y) {
   if (!p) return;
   for (const l of p.layers) {
     const n = nodes.get(l.id);
-    const N = p.format === 'classic' ? 0 : l.parallax || 0;
-    if (n) n.px.style.transform = N ? `translate(${live.tiltX * N}px, ${live.tiltY * N}px)` : '';
+    if (n) applyGyro(l, n, p);
   }
 }
 

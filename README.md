@@ -8,11 +8,12 @@ Runs entirely in the browser as an installable web app (PWA): nothing to install
 
 | | |
 |---|---|
-| **Two export formats** | **Modern** – ParameterizedCA for iOS 26/27: values *follow your finger* while you swipe up/pull down, gyro parallax, iOS 27 depth fix. **Classic** – LayeredAnimation for iOS 17+: spring transitions, Light/Dark variants. |
+| **Three export formats** | **Modern** – ParameterizedCA for iOS 26/27: values *follow your finger* while you swipe up/pull down, gyro, iOS 27 depth fix. **Duo** – iPhone Duo (foldable) split screens: cover + inner display, portrait & landscape. **Classic** – LayeredAnimation for iOS 17+: spring transitions, Light/Dark variants. |
 | **Layers** | Image, GIF, video, text (custom TTF/OTF fonts), gradient, color, shapes, **Glass** (Frosted / Liquid Glass / live blur), particles, image sequences |
 | **Depth** | Behind the clock / in front of the clock (depth effect) |
 | **Swipe & states** | Lock · Home · Always-On – position, scale, rotation, opacity per state; 14 one-tap swipe effects |
-| **Gyro parallax** | Per-layer depth, preview with the mouse or the phone's motion sensor |
+| **Gyro** | Per layer: move (parallax), **3D tilt** and **gyro fade** – preview with the mouse or the phone's motion sensor |
+| **3D** | Tilt X/Y per layer and per state with adjustable perspective; 3D flip / tilt-back / swing-in effects; **fast fade** (quadratic, less double exposure) |
 | **Animations** | Any number per layer: float, bounce, drift, pulse, heartbeat, spin, sway, wiggle, breathe, blink or your own keyframes – loop or play once, easing, phase |
 | **Style** | 16 blend modes, blur, hue, saturation, contrast, corner radius |
 | **GIFs** | Built-in GIPHY / Tenor search (incl. transparent stickers) and GIF file import with exact timing |

@@ -83,6 +83,25 @@ Everything except `main.caml`, assets, `Wallpaper.plist`, `userInfo`, the descri
 
 Verified state key paths [K]: `opacity`, `position.x`, `position.y`, `transform.scale.xy`, `transform.rotation.z` (radians), `hidden`. Opacity outside 0–1 is clamped.
 
+## iPhone Duo (iOS 27 split-screen schema) [K]
+
+Apple's own Duo wallpaper (Clownfish-V68) layout, device-verified by [K]:
+
+- Root `6000 × 6000`, one root unit = one device pixel, centred on each screen, y up.
+- `<style>` holds `<wallpapers type="NSArray">` with one dictionary per screen (cover first): `backgroundLayerName` / `floatingLayerName` (`BACKGROUND TWO` / `FLOATING TWO` = cover, `… ONE` = inner), their own `…ParallaxGroups` and `…PropertyGroups`, and Apple's screen numbers (`idealWidth/Height`, `pixelWidth/Height`, `pixelParallaxBleed`, `pixelSquareWith(out)Parallax`, `retinaMultiplier`, `screenName`, `supportsLandscape`).
+- Property groups have no `view` key and carry `portrait_lock/home/sleep` + `landscape_lock/home/sleep`.
+- `Wallpaper.plist` needs `requiresLandscapeScaling = false`, otherwise the inner landscape is scaled up by 951/669.
+- Tendies Studio designs one square scene (951 × 951 pt) and places it per screen inside a `Frame` layer with `transform="scale(3, 3, 1)"` – the cover shows a tighter crop, opening the phone feels like zooming out.
+
+## Gyro beyond translation (experimental)
+
+Only `transform.translation.x/y` parallax groups are device-verified [K]. Tendies Studio can additionally write parallax groups for:
+
+- **3D tilt** – `transform.rotation.y` (axis x) and `transform.rotation.x` (axis y), `mapMin/MaxTo` in radians, on a `<name> Tilt` layer; planes get `sublayerTransform="perspective(N)"`.
+- **Gyro fade** – `opacity` mapped to one tilt axis on a `<name> GyroFade` layer.
+
+**Fast fade** (device-verified technique E4 [K]): the opacity state is written to two nested layers (`<name>` and `<name> Fade`) with √ values, so the visible opacity follows (1−u)² instead of a linear fade.
+
 ## One editor layer → CAML
 
 ```

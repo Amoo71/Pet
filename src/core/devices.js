@@ -15,6 +15,7 @@ export const DEVICES = [
   { id: 'iphone-11-pro-max', name: 'iPhone 11 Pro Max / XS Max', w: 414, h: 896, scale: 3 },
   { id: 'iphone-se', name: 'iPhone SE (2./3. Gen) / 8', w: 375, h: 667, scale: 2 },
   { id: 'iphone-8-plus', name: 'iPhone 8 Plus', w: 414, h: 736, scale: 3 },
+  { id: 'iphone-duo', name: 'iPhone Duo (foldable) – square scene', w: 951, h: 951, scale: 3, duo: true },
   { id: 'ipad-11', name: 'iPad Pro 11" / Air 11"', w: 834, h: 1194, scale: 2, ipad: true },
   { id: 'ipad-13', name: 'iPad Pro 13" / Air 13"', w: 1032, h: 1376, scale: 2, ipad: true },
   { id: 'ipad-10', name: 'iPad (10./11. Gen)', w: 820, h: 1180, scale: 2, ipad: true },

@@ -22,7 +22,7 @@ import { createZip } from './zip.js';
 import { toXmlPlist, int, real, data, uid as plistUid, parsePlist } from './plist.js';
 import { toBinaryPlist } from './bplist.js';
 import { PLANES, ANIMATABLE, animatedProps, hasLoops } from './model.js';
-import { buildModernCaml, buildClassicCaml, buildIndexXml, ASSET_MANIFEST, uniqueNames } from './caml.js';
+import { buildModernCaml, buildDuoCaml, buildClassicCaml, buildIndexXml, ASSET_MANIFEST, uniqueNames } from './caml.js';
 import { getDevice, screenClass } from './devices.js';
 import { PCA_FILES, PCA_WALLPAPER_DIR } from './template-data.js';
 
@@ -90,6 +90,11 @@ export function validateProject(project) {
     if (l.kind === 'glass' && l.glass?.mode === 'live') issues.push({ level: 'info', msg: `“${l.name}”: live backdrop blur is experimental – “Frosted (baked)” works everywhere.` });
     if (!modern && l.parallax > 0) issues.push({ level: 'info', msg: `“${l.name}”: gyro parallax only exists in the Modern format.` });
   }
+  if (project.format === 'duo' && project.device !== 'iphone-duo') issues.push({ level: 'warn', msg: 'Duo format: switch the device to “iPhone Duo” so the scene covers all three postures.' });
+  if (project.format === 'duo') issues.push({ level: 'info', msg: 'Duo format is for iPhone Duo (foldable) on iOS 27 – import with AirCard Depth Test. Use Modern for regular iPhones.' });
+  for (const l of project.layers) {
+    if (modern && (l.gyro?.tilt > 0 || (l.gyro?.fade && l.gyro.fade !== 'none'))) issues.push({ level: 'info', msg: `“${l.name}”: gyro 3D tilt / gyro fade are experimental (only gyro move is device-verified).` });
+  }
   if (modern && project.appearanceAware) issues.push({ level: 'info', msg: 'Light/Dark variants are only exported in the Classic format.' });
   const loops = project.layers.filter((l) => !l.hidden && hasLoops(l));
   if (loops.length)
@@ -138,7 +143,8 @@ async function collectResources(project, render, caDir, add) {
 export async function buildModernDescriptor(project, render, opts = {}) {
   const assetFiles = [];
   const resources = await collectResources(project, render, '', (p, b) => assetFiles.push({ p: p.replace(/^\//, ''), b }));
-  const caml = buildModernCaml(project, resources, { batter: opts.batter });
+  const duo = project.format === 'duo';
+  const caml = (duo ? buildDuoCaml : buildModernCaml)(project, resources, { batter: opts.batter });
   // identity follows the content (re-exporting the same design keeps it, any change gets a new one)
   const digest = await sha256([enc.encode(caml), ...assetFiles.flatMap((f) => [enc.encode(f.p), f.b]), enc.encode(opts.salt || '')]);
   const ident = opts.ident ?? 100000 + (((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]) >>> 0) % 900000;
@@ -185,6 +191,8 @@ export async function buildModernDescriptor(project, render, opts = {}) {
       productTypes: PRODUCT_TYPES,
       wantsDeviceMotion: true,
       name: 'Lavender',
+      // Duo per-screen schema: without this the inner landscape gets scaled up by 951/669 (device-verified)
+      ...(duo ? { requiresLandscapeScaling: false } : {}),
     })
   );
   add(`${ca}/main.caml`, caml);

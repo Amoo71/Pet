@@ -11,7 +11,7 @@
 // uses y-down, so every y position is mirrored (H - y), rotations are negated and
 // emitter directions flipped. (PosterLab, tendies_kit and CAPlayground all agree.)
 
-import { ANIMATABLE, PLANES, STATES, animatedProps, effective } from './model.js';
+import { ANIMATABLE, PLANES, STATES, DUO, animatedProps, effective } from './model.js';
 
 export const CAML_NS = 'http://www.apple.com/CoreAnimation/1.0';
 const DEG = Math.PI / 180;
@@ -33,7 +33,8 @@ export function hexToRgb(hex = '#ffffff') {
 /** editor value → CA value for a state property (needs the document height for y) */
 export function caStateValue(prop, v, H) {
   if (prop === 'y') return H - v;
-  if (prop === 'rotation') return -v * DEG;
+  if (prop === 'rotation' || prop === 'rotX') return -v * DEG;
+  if (prop === 'rotY') return v * DEG;
   return v;
 }
 
@@ -45,9 +46,9 @@ export function uniqueNames(layers) {
     let base = String(l.name || l.kind).replace(/[^\w \-.]+/g, '').trim() || l.kind;
     let n = base;
     let i = 2;
-    while (used.has(n) || used.has(`${n} Parallax`)) n = `${base} ${i++}`;
-    used.add(n);
-    used.add(`${n} Parallax`);
+    const SUFFIXES = ['', ' Parallax', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
+    while (SUFFIXES.some((x) => used.has(n + x))) n = `${base} ${i++}`;
+    for (const x of SUFFIXES) used.add(n + x);
     map.set(l.id, n);
   }
   return map;
@@ -169,9 +170,11 @@ function filtersXml(layer, ind) {
 }
 
 /** transform attribute for static rotation / scale (CAPlayground syntax). */
-function transformAttr(rotation, scale) {
+function transformAttr(rotation, scale, rotX = 0, rotY = 0) {
   const parts = [];
   if (rotation) parts.push(`rotate(${num(-rotation)}deg)`);
+  if (rotY) parts.push(`rotate(${num(rotY)}deg, 0, 1, 0)`);
+  if (rotX) parts.push(`rotate(${num(-rotX)}deg, 1, 0, 0)`);
   if (scale != null && scale !== 1) parts.push(`scale(${num(scale)}, ${num(scale)}, 1)`);
   return parts.length ? ` transform="${parts.join(' ')}"` : '';
 }
@@ -195,21 +198,31 @@ export function layerXml(layer, res, ctx, ind = '      ') {
     lines.push('\t'.repeat(depth) + s);
   };
   const pad = () => ind + '\t'.repeat(depth);
-  const wantsParallax = ctx.format === 'modern' && layer.parallax > 0;
+  const wantsParallax = ctx.format !== 'classic' && layer.parallax > 0;
   if (wantsParallax) {
     lines.push(`${pad()}<CATransformLayer id="${esc(layer.id)}-px" name="${esc(name)} Parallax" bounds="0 0 ${num(ctx.W)} ${num(ctx.H)}" position="${num(ctx.W / 2)} ${num(ctx.H / 2)}" ${COMMON}>`);
     depth++;
     lines.push(`${pad()}<sublayers>`);
     depth++;
   }
+  const fast = fastFadeActive(layer, ctx);
+  const outerOpacity = fast ? Math.sqrt(Math.max(0, base.opacity)) : base.opacity;
   lines.push(
-    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" position="${num(base.x)} ${num(H - base.y)}" opacity="${num(base.opacity)}"${transformAttr(base.rotation, base.scale)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
+    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" position="${num(base.x)} ${num(H - base.y)}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
   );
   depth++;
   const fx = filtersXml(layer, pad());
   if (fx) lines.push(fx);
   const anims = (layer.anims || []).filter((a) => a.enabled !== false && (a.keys || []).length >= 2);
   const center = `position="${num(layer.w / 2)} ${num(layer.h / 2)}"`;
+  // helper wrappers (fast fade, gyro tilt, gyro fade) – each its own layer so groups never collide
+  const wrappers = wrapperSpecs(layer, ctx, name, base);
+  wrappers.forEach((w) => {
+    lines.push(`${pad()}<sublayers>`);
+    depth++;
+    lines.push(`${pad()}<${w.kind || 'CALayer'} id="${esc(layer.id)}-${w.suffix}" name="${esc(w.name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" ${center}${w.attrs || ''} ${COMMON}>`);
+    depth++;
+  });
   // nested animation layers
   anims.forEach((a, i) => {
     lines.push(`${pad()}<sublayers>`);
@@ -251,6 +264,12 @@ export function layerXml(layer, res, ctx, ind = '      ') {
     depth--;
     lines.push(`${pad()}</sublayers>`);
   }
+  for (let i = wrappers.length - 1; i >= 0; i--) {
+    depth--;
+    lines.push(`${pad()}</${wrappers[i].kind || 'CALayer'}>`);
+    depth--;
+    lines.push(`${pad()}</sublayers>`);
+  }
   depth--;
   lines.push(`${pad()}</CALayer>`);
   if (wantsParallax) {
@@ -262,6 +281,65 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   void open;
   return lines.join('\n');
 }
+
+const usesGyro = (ctx) => ctx.format === 'modern' || ctx.format === 'duo';
+
+function fastFadeActive(layer, ctx) {
+  return usesGyro(ctx) && layer.fastFade && animatedProps(layer, false).includes('opacity');
+}
+
+/** extra nested layers a layer needs, outermost first */
+function wrapperSpecs(layer, ctx, name, base) {
+  const out = [];
+  if (fastFadeActive(layer, ctx)) out.push({ suffix: 'ff', name: `${name} Fade`, attrs: ` opacity="${num(Math.sqrt(Math.max(0, base.opacity)))}"` });
+  if (usesGyro(ctx) && layer.gyro?.tilt > 0) out.push({ suffix: 'tilt', name: `${name} Tilt` });
+  if (usesGyro(ctx) && layer.gyro?.fade && layer.gyro.fade !== 'none') out.push({ suffix: 'gf', name: `${name} GyroFade` });
+  return out;
+}
+
+/** state property groups of one layer: [{name, keyPath, lock, home, sleep}] (CA values) */
+export function layerPropertyGroups(layer, name, H) {
+  const out = [];
+  const props = animatedProps(layer, false);
+  const fast = layer.fastFade && props.includes('opacity');
+  for (const p of props) {
+    const def = ANIMATABLE.find((a) => a.id === p);
+    let v = (st) => caStateValue(p, effective(layer, st, false)[p], H);
+    if (p === 'opacity' && fast) {
+      const raw = v;
+      v = (st) => Math.sqrt(Math.max(0, Math.min(1, raw(st))));
+      out.push({ name: `${name} Fade`, keyPath: 'opacity', lock: v('Locked'), home: v('Unlock'), sleep: v('Sleep') });
+    }
+    out.push({ name, keyPath: def.pcaKeyPath, lock: v('Locked'), home: v('Unlock'), sleep: v('Sleep') });
+  }
+  return out;
+}
+
+/** gyro groups of one layer: [{name, axis, keyPath, min, max, type}] */
+export function layerGyroGroups(layer, name) {
+  const out = [];
+  const n = Math.round(layer.parallax || 0);
+  if (n > 0) for (const axis of ['x', 'y']) out.push({ name: `${name} Parallax`, axis, keyPath: `transform.translation.${axis}`, min: -n, max: n, type: 'integer' });
+  const t = layer.gyro?.tilt || 0;
+  if (t > 0) {
+    out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: -t * DEG, max: t * DEG, type: 'real' });
+    out.push({ name: `${name} Tilt`, axis: 'y', keyPath: 'transform.rotation.x', min: -t * DEG, max: t * DEG, type: 'real' });
+  }
+  const f = layer.gyro?.fade;
+  if (f && f !== 'none') {
+    const axis = f.replace('-', '');
+    const lo = Math.max(0, Math.min(1, layer.gyro.fadeMin ?? 0));
+    const hi = Math.max(0, Math.min(1, layer.gyro.fadeMax ?? 1));
+    const flip = f.startsWith('-');
+    out.push({ name: `${name} GyroFade`, axis, keyPath: 'opacity', min: flip ? hi : lo, max: flip ? lo : hi, type: 'real' });
+  }
+  return out;
+}
+
+const perspectiveAttr = (project, layers) =>
+  layers.some((l) => l.rotX || l.rotY || l.gyro?.tilt > 0 || Object.values(l.states || {}).some((s) => 'rotX' in s || 'rotY' in s))
+    ? ` sublayerTransform="perspective(${num(project.perspective || 900)})"`
+    : '';
 
 // ---------------------------------------------------------------- modern (ParameterizedCA)
 
@@ -284,21 +362,15 @@ export function buildModernCaml(project, resources, opts = {}) {
   for (const l of project.layers) {
     const view = l.plane === 'background' ? 'Background' : 'Floating';
     const n = names.get(l.id);
-    for (const p of animatedProps(l, false)) {
-      const def = ANIMATABLE.find((a) => a.id === p);
-      const v = (st) => caStateValue(p, effective(l, st, false)[p], H);
-      props.push(dict([['image', 'null'], ['keyPath', 'string', def.pcaKeyPath], ['layerName', 'string', n], ['v_home', 'real', num(v('Unlock'))], ['v_lock', 'real', num(v('Locked'))], ['v_sleep', 'real', num(v('Sleep'))], ['view', 'string', view]], I.repeat(4)));
-    }
-    if (l.parallax > 0) {
-      for (const axis of ['x', 'y']) {
-        parallax.push(dict([['axis', 'string', axis], ['image', 'string', 'null'], ['keyPath', 'string', `transform.translation.${axis}`], ['layerName', 'string', `${n} Parallax`], ['mapMaxTo', 'integer', Math.round(l.parallax)], ['mapMinTo', 'integer', -Math.round(l.parallax)], ['title', 'string', 'Gyro'], ['view', 'string', view]], I.repeat(4)));
-      }
-    }
+    for (const g of layerPropertyGroups(l, n, H))
+      props.push(dict([['image', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['v_home', 'real', num(g.home)], ['v_lock', 'real', num(g.lock)], ['v_sleep', 'real', num(g.sleep)], ['view', 'string', view]], I.repeat(4)));
+    for (const g of layerGyroGroups(l, n))
+      parallax.push(dict([['axis', 'string', g.axis], ['image', 'string', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['mapMaxTo', g.type, num(g.max)], ['mapMinTo', g.type, num(g.min)], ['title', 'string', 'Gyro'], ['view', 'string', view]], I.repeat(4)));
   }
   const group = (plane) => {
     const layers = project.layers.filter((l) => l.plane === plane.id);
     const body = layers.map((l) => layerXml(l, resources.get(l.id) || {}, ctx, I.repeat(4))).join('\n');
-    return `${I.repeat(2)}<CALayer id="${plane.id}" name="${plane.group}" bounds="0 0 ${num(W)} ${num(H)}" position="${num(W / 2)} ${num(H / 2)}" geometryFlipped="0" masksToBounds="0" opacity="1" ${COMMON} cornerCurve="circular">\n${I.repeat(3)}<sublayers>${body ? `\n${body}\n${I.repeat(3)}` : ''}</sublayers>\n${I.repeat(2)}</CALayer>`;
+    return `${I.repeat(2)}<CALayer id="${plane.id}" name="${plane.group}" bounds="0 0 ${num(W)} ${num(H)}" position="${num(W / 2)} ${num(H / 2)}"${perspectiveAttr(project, layers)} geometryFlipped="0" masksToBounds="0" opacity="1" ${COMMON} cornerCurve="circular">\n${I.repeat(3)}<sublayers>${body ? `\n${body}\n${I.repeat(3)}` : ''}</sublayers>\n${I.repeat(2)}</CALayer>`;
   };
   const arr = (tag, items) => (items.length ? `${I.repeat(3)}<${tag} type="NSArray">\n${items.join('\n')}\n${I.repeat(3)}</${tag}>` : `${I.repeat(3)}<${tag} type="NSArray"/>`);
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -313,6 +385,90 @@ ${I.repeat(2)}</style>
 ${I.repeat(2)}<sublayers>
 ${PLANES.map(group).join('\n')}
 ${I.repeat(2)}</sublayers>
+${I}</CALayer>
+</caml>
+`;
+}
+
+// ---------------------------------------------------------------- iPhone Duo (iOS 27 per-screen schema)
+
+/**
+ * iPhone Duo split-screen wallpaper (Apple's Clownfish-V68 layout, device-verified by tendies_kit):
+ * root 6000×6000 px, one BACKGROUND/FLOATING pair per screen (ONE = inner, TWO = cover), each with
+ * its own parallax + property groups holding portrait_* and landscape_* values. The scene (S×S pt)
+ * is placed once per screen in a Frame layer scaled to 3 px/pt around the screen centre, so the cover
+ * shows a tighter crop and opening the phone feels like zooming out.
+ */
+export function buildDuoCaml(project, resources, opts = {}) {
+  const S = project._w;
+  const H = project._h;
+  const R = DUO.root;
+  const C = R / 2;
+  const I = '  ';
+  const screens = {};
+  for (const [scr, info] of Object.entries(DUO.screens)) {
+    const key = info.key;
+    // per-screen copies with unique ids + names
+    const copies = project.layers.map((l) => ({ ...l, id: `${l.id}-${key}` }));
+    const names = new Map([...uniqueNames(project.layers)].map(([id, n]) => [`${id}-${key}`, `${n} ${key}`]));
+    const res = new Map([...resources].map(([id, r]) => [`${id}-${key}`, r]));
+    const ctx = { W: S, H, names, format: 'duo', batter: opts.batter };
+    const trees = {};
+    for (const plane of PLANES) {
+      const layers = copies.filter((l) => l.plane === plane.id);
+      const body = layers.map((l) => layerXml(l, res.get(l.id) || {}, ctx, I.repeat(6))).join('\n');
+      const groupName = `${plane.group} ${key}`;
+      const xml = `${I.repeat(3)}<CALayer id="${plane.id}-${key}" name="${groupName}" bounds="0 0 ${R} ${R}" position="${C} ${C}" geometryFlipped="0" masksToBounds="0" opacity="1" ${COMMON} cornerCurve="circular">
+${I.repeat(4)}<sublayers>
+${I.repeat(5)}<CALayer id="frame-${plane.id}-${key}" name="Frame ${plane.short} ${key}" bounds="0 0 ${num(S)} ${num(H)}" position="${C} ${C}" transform="scale(${DUO.ppt}, ${DUO.ppt}, 1)"${perspectiveAttr(project, layers)} geometryFlipped="0" masksToBounds="0" opacity="1" ${COMMON} cornerCurve="circular">
+${I.repeat(6)}<sublayers>${body ? `\n${body}\n${I.repeat(6)}` : ''}</sublayers>
+${I.repeat(5)}</CALayer>
+${I.repeat(4)}</sublayers>
+${I.repeat(3)}</CALayer>`;
+      const props = [];
+      const par = [];
+      for (const l of layers) {
+        const n = names.get(l.id);
+        for (const g of layerPropertyGroups(l, n, H))
+          props.push([['keyPath', 'string', g.keyPath], ['landscape_home', 'real', g.home], ['landscape_lock', 'real', g.lock], ['landscape_sleep', 'real', g.sleep], ['layerName', 'string', g.name], ['portrait_home', 'real', g.home], ['portrait_lock', 'real', g.lock], ['portrait_sleep', 'real', g.sleep]]);
+        for (const g of layerGyroGroups(l, n))
+          par.push([['axis', 'string', g.axis], ['image', 'string', 'null'], ['keyPath', 'string', g.keyPath], ['layerName', 'string', g.name], ['mapMaxTo', g.type, g.max], ['mapMinTo', g.type, g.min], ['title', 'string', 'Gyro'], ['view', 'string', plane.id === 'background' ? 'Background' : 'Floating']]);
+      }
+      trees[plane.id] = { xml, name: groupName, props, par };
+    }
+    screens[scr] = { info, trees };
+  }
+  const ind = I.repeat(5);
+  const array = (tag, dicts) => {
+    if (!dicts.length) return [`${ind}<${tag} type="NSArray"/>`];
+    const out = [`${ind}<${tag} type="NSArray">`];
+    for (const d of dicts) {
+      out.push(`${ind}  <NSDictionary>`);
+      for (const [k, t, v] of d) out.push(`${ind}    <${k} type="${t}" value="${t === 'integer' ? Math.round(v) : t === 'real' ? num(v) : esc(v)}"/>`);
+      out.push(`${ind}  </NSDictionary>`);
+    }
+    return [...out, `${ind}</${tag}>`];
+  };
+  const style = [`${I.repeat(2)}<style>`, `${I.repeat(3)}<wallpapers type="NSArray">`];
+  for (const scr of ['cover', 'inner']) {
+    const { info, trees } = screens[scr];
+    style.push(`${I.repeat(4)}<NSDictionary>`, `${ind}<backgroundAssetNames type="NSArray"/>`, `${ind}<backgroundLayerName type="string" value="${trees.background.name}"/>`);
+    style.push(...array('backgroundParallaxGroups', trees.background.par), ...array('backgroundPropertyGroups', trees.background.props));
+    style.push(`${ind}<floatingAssetNames type="NSArray"/>`, `${ind}<floatingLayerName type="string" value="${trees.floating.name}"/>`);
+    style.push(...array('floatingParallaxGroups', trees.floating.par), ...array('floatingPropertyGroups', trees.floating.props));
+    for (const k of ['idealHeight', 'idealWidth', 'pixelHeight', 'pixelParallaxBleed', 'pixelSquareWithParallax', 'pixelSquareWithoutParallax', 'pixelWidth']) style.push(`${ind}<${k} type="integer" value="${info[k]}"/>`);
+    style.push(`${ind}<retinaMultiplier type="integer" value="3"/>`, `${ind}<screenName type="string" value="${info.screenName}"/>`, `${ind}<supportsLandscape type="integer" value="1"/>`, `${I.repeat(4)}</NSDictionary>`);
+  }
+  style.push(`${I.repeat(3)}</wallpapers>`, `${I.repeat(2)}</style>`);
+  const body = ['inner', 'cover'].flatMap((scr) => [screens[scr].trees.background.xml, screens[scr].trees.floating.xml]);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<caml xmlns="${CAML_NS}">
+${I}<CALayer id="root" name="Root Layer" bounds="0 0 ${R} ${R}" position="${C} ${C}" zPosition="0" geometryFlipped="0" opacity="1" backgroundColor="0 0 0" ${COMMON} cornerCurve="circular">
+${style.join('\n')}
+${I.repeat(2)}<sublayers>
+${body.join('\n')}
+${I.repeat(2)}</sublayers>
+${I.repeat(2)}<modules/>
 ${I}</CALayer>
 </caml>
 `;

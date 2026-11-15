@@ -97,4 +97,36 @@ migrateProject(old);
 assert.equal(old.format, 'classic');
 assert.equal(old.layers[0].plane, 'floating');
 assert.equal(old.layers[0].anims[0].preset, 'spin');
+
+// --- Duo + 3D + gyro tilt/fade + fast fade
+{
+  const p = newProject('iphone-duo', { w: 951, h: 951 });
+  p.format = 'duo';
+  p.device = 'iphone-duo';
+  const bg = newLayer('gradient', p, { parallax: 6 });
+  const hero = newLayer('image', p, { asset: 'a', plane: 'floating', parallax: 14, rotX: 10, gyro: { tilt: 8, fade: 'x', fadeMin: 0.2, fadeMax: 1 }, fastFade: true });
+  hero.states = { Unlock: { opacity: 0, rotY: 25 }, Sleep: { y: 700 } };
+  p.layers.push(bg, hero);
+  const zip = await buildTendies(p, render);
+  writeFileSync(`${out}/duo.tendies`, zip);
+  const files = await readZip(zip);
+  const names = [...files.keys()];
+  const caml = text(files.get(names.find((n) => n.endsWith('main.caml'))));
+  for (const k of ['BACKGROUND ONE', 'FLOATING ONE', 'BACKGROUND TWO', 'FLOATING TWO']) assert(caml.includes(`name="${k}"`), k);
+  assert(caml.includes('<wallpapers type="NSArray">'));
+  assert(caml.includes('<screenName type="string" value="Cover Screen"/>'));
+  assert(caml.includes('portrait_home') && caml.includes('landscape_lock'));
+  assert(caml.includes('transform="scale(3, 3, 1)"'), 'frame scale');
+  assert(caml.includes('sublayerTransform="perspective('), 'perspective');
+  assert(caml.includes('value="transform.rotation.y"') && caml.includes('value="transform.rotation.x"'), 'tilt + rotY groups');
+  assert(caml.includes(`value="${hero.name} TWO GyroFade"`) || caml.includes('GyroFade'), 'gyro fade target');
+  assert(caml.includes(' Fade ONE') === false, 'suffix order');
+  assert((caml.match(/Image ONE Fade"/g) || []).length >= 1, 'fast fade wrapper + group');
+  const wp = parsePlist(files.get(names.find((n) => n.endsWith('Wallpaper.plist'))));
+  assert.equal(wp.requiresLandscapeScaling, false);
+  // every name unique
+  const all = [...caml.matchAll(/ name="([^"]+)"/g)].map((m) => m[1]);
+  const dup = all.filter((n, i) => all.indexOf(n) !== i && !n.startsWith('Cell'));
+  assert.deepEqual(dup, [], 'unique layer names');
+}
 console.log('OK');

@@ -69,7 +69,8 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await pg.click('.chip:has-text("Dim in Always-On")');
   await pg.click('[data-anim="float"]');
   await pg.click('[data-anim="spin"]');
-  await pg.locator('.section:has-text("Gyro parallax") input.num').fill('14');
+  await pg.locator('.section:has-text("Gyro") .field:has-text("Move") input.num').fill('14');
+  await pg.locator('.section:has-text("Gyro") .field:has-text("3D tilt") input.num').fill('12');
   let p = await project();
   let l = p.layers.find((x) => x.name === 'pic');
   assert.equal(l.states.Sleep.opacity, 0.25);
@@ -102,8 +103,8 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await pg.click('.seg.mode .seg-btn[data-v="edit"]');
   await pg.click('.seg.states .seg-btn[data-v="Locked"]');
 
-  // export both formats
-  for (const format of ['modern', 'classic']) {
+  // export all formats (duo last: it switches the device)
+  for (const format of ['modern', 'classic', 'duo']) {
     await pg.click('#exportBtn');
     await pg.click(`.format-card[data-format="${format}"]`);
     const dl = pg.waitForEvent('download');
@@ -112,6 +113,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
     await (await dl).saveAs(file);
     assert(fs.statSync(file).size > 1000);
   }
+  assert.equal((await project()).device, 'iphone-duo', 'duo switches device');
   // re-import the modern file
   await pg.click('.tab[data-tab="project"]');
   fc = pg.waitForEvent('filechooser');
@@ -122,6 +124,10 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   const ipic = imp.layers.find((x) => x.name === 'pic');
   assert(ipic.states.Unlock && Math.abs(ipic.states.Unlock.y - pic.states.Unlock.y) < 2, 'state y survives a modern round trip');
   assert.equal(ipic.parallax, 14, 'parallax survives');
+  // Duo template + postures
+  await pg.click('#libBtn');
+  await pg.click('.tpl[data-tpl="duo3d"]');
+  for (const v of ['cover', 'land', 'inner']) await pg.click(`.seg.posture .seg-btn[data-v="${v}"]`);
   assert.equal(ipic.blend, 'screenBlendMode', 'blend survives');
 
   assert.deepEqual(errors, []);

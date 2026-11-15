@@ -15,7 +15,7 @@ export function mountPanels(root) {
   subscribe((reason) => {
     const l = selectedLayer();
     const p = store.project;
-    const key = JSON.stringify([store.view.tab, store.selection, l?.kind, p?.id, p?.appearanceAware, p?.format, l?.text?.fontAsset, !!l?.transition, l?.gradient?.stops?.length, l?.shape?.type, l?.emitter?.preset, l?.glass?.mode, p?.layers.length, (l?.anims || []).map((a) => [a.id, a.preset, a.prop, a.keys.length, a.repeat])]);
+    const key = JSON.stringify([store.view.tab, store.selection, l?.kind, p?.id, p?.appearanceAware, p?.format, l?.text?.fontAsset, !!l?.transition, l?.gradient?.stops?.length, l?.shape?.type, l?.emitter?.preset, l?.glass?.mode, l?.gyro?.fade, p?.layers.length, (l?.anims || []).map((a) => [a.id, a.preset, a.prop, a.keys.length, a.repeat])]);
     const structural = ['project', 'history', 'select'].includes(reason) || key !== lastKey;
     const live = (store.view.tab === 'layers' && reason === 'edit') || (reason === 'view' && store.view.tab === 'motion');
     if (structural || live) {
@@ -154,6 +154,8 @@ function stylePanel() {
       animField(ANIMATABLE[3], 'Scale', { slider: true, min: 0, max: 3 }),
       animField(ANIMATABLE[4], 'Rotation', { slider: true, min: -180, max: 180, unit: '°' }),
       animField(ANIMATABLE[0], 'Opacity', { slider: true, min: 0, max: 1 }),
+      animField(ANIMATABLE[5], '3D tilt X', { slider: true, min: -90, max: 90, unit: '°' }),
+      animField(ANIMATABLE[6], '3D tilt Y', { slider: true, min: -90, max: 90, unit: '°' }),
       el('div', { class: 'align-row' }, [
         ['left', '⇤', 'Align left'], ['hcenter', '↔', 'Center horizontally'], ['right', '⇥', 'Align right'],
         ['top', '⤒', 'Align top'], ['vcenter', '↕', 'Center vertically'], ['bottom', '⤓', 'Align bottom'], ['fill', '⛶', 'Fill screen'],
@@ -330,6 +332,9 @@ const RECIPES = [
   ['Slide down on unlock', (l, p) => (l.states.Unlock = { ...l.states.Unlock, y: l.y + p._h * 0.3 })],
   ['Fly off left', (l, p) => (l.states.Unlock = { ...l.states.Unlock, x: -l.w })],
   ['Fly in from right', (l, p) => ((l.states.Unlock = { ...l.states.Unlock, x: l.x }), (l.x = p._w + l.w))],
+  ['3D flip on unlock', (l) => (l.states.Unlock = { ...l.states.Unlock, rotY: (l.rotY || 0) + 180 })],
+  ['3D tilt back & fade', (l) => ((l.fastFade = true), (l.states.Unlock = { ...l.states.Unlock, rotX: 65, scale: 0.85, opacity: 0 }))],
+  ['3D swing in', (l) => ((l.states.Unlock = { ...l.states.Unlock, rotY: 0, opacity: 1 }), (l.rotY = -80), (l.opacity = 0), (l.fastFade = true))],
   ['Spin on unlock', (l) => (l.states.Unlock = { ...l.states.Unlock, rotation: (l.rotation || 0) + 180 })],
   ['Push background in', (l) => (l.states.Unlock = { ...l.states.Unlock, scale: 1.08 })],
   ['Dim in Always-On', (l) => (l.states.Sleep = { ...l.states.Sleep, opacity: 0.25 })],
@@ -377,15 +382,23 @@ function motionPanel() {
     section('States', [
       el('p', { class: 'muted' }, 'Pick a state, then drag / scale / rotate the layer on the canvas. PosterBoard switches states itself: Lock, Home (after unlocking) and Always-On.'),
       ...rows,
+      modern ? toggleField('Fast fade', () => selectedLayer().fastFade, (v) => L((x) => (x.fastFade = v)), 'Quadratic fade via two nested layers – disappears quicker, less double exposure (device-verified technique)') : null,
       Object.keys(l.states).length ? button('Reset all states of this layer', () => update((pp) => (pp.layers.find((x) => x.id === l.id).states = {})), 'danger subtle') : null,
     ])
   );
 
   if (modern) {
+    const gy = () => selectedLayer().gyro || {};
+    const GY = (k, parse = Number) => (v) => L((x) => (x.gyro = { ...x.gyro, [k]: parse(v) }), g(`gy${k}`));
     out.push(
-      section('Gyro parallax', [
-        numField('Depth', () => selectedLayer().parallax || 0, (v) => L((x) => (x.parallax = Math.max(0, v)), g('px')), { min: 0, max: 60, slider: true, unit: 'pt' }),
-        el('p', { class: 'muted' }, 'How far the layer shifts when the phone tilts. Far: 4–8 · middle: 10–14 · near: 20–40. Keep nearer layers at higher values. Tilt the preview with your mouse or enable motion in ▶ Preview.'),
+      section('Gyro', [
+        numField('Move', () => selectedLayer().parallax || 0, (v) => L((x) => (x.parallax = Math.max(0, v)), g('px')), { min: 0, max: 60, slider: true, unit: 'pt' }),
+        el('p', { class: 'muted' }, 'Shift when the phone tilts (device-verified). Far 4–8 · middle 10–14 · near 20–40 – nearer layers move more.'),
+        numField('3D tilt', () => gy().tilt || 0, GY('tilt'), { min: 0, max: 45, slider: true, unit: '°' }),
+        el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Gyro fade'), segmented([['none', 'Off'], ['x', '← →'], ['-x', '→ ←'], ['y', '↑ ↓'], ['-y', '↓ ↑']], () => gy().fade || 'none', GY('fade', String))]),
+        gy().fade && gy().fade !== 'none' ? numField('Fade from', () => gy().fadeMin ?? 0, GY('fadeMin'), { min: 0, max: 1, step: 0.05, slider: true }) : null,
+        gy().fade && gy().fade !== 'none' ? numField('Fade to', () => gy().fadeMax ?? 1, GY('fadeMax'), { min: 0, max: 1, step: 0.05, slider: true }) : null,
+        el('p', { class: 'muted' }, '3D tilt rotates the layer with the phone; Gyro fade changes opacity as you tilt (e.g. reveal a hidden layer). Both are experimental. Preview: ▶ Preview + move the mouse, or 🧭 Motion on iPhone.'),
       ])
     );
   } else {
@@ -484,10 +497,13 @@ function projectPanel() {
     section('Wallpaper', [
       textField('Name', () => store.project.name, (v) => P((pp) => (pp.name = v), 'pname')),
       selectField('Device', DEVICES.map((x) => [x.id, `${x.name} · ${x.w}×${x.h}`]), () => store.project.device, (v) => A.changeDevice(v)),
-      el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Format'), segmented([['modern', 'Modern · iOS 26/27'], ['classic', 'Classic · iOS 17+']], () => store.project.format || 'modern', (v) => P((pp) => (pp.format = v)))]),
-      el('p', { class: 'muted' }, modern
-        ? 'ParameterizedCA: one bundle with Lock/Home/Always-On values that follow your finger, gyro parallax and the iOS 27 depth fix. Recommended for iOS 26 and 27.'
-        : 'LayeredAnimation: three bundles with spring transitions and optional Light/Dark states. Loses gyro on iOS 27.'),
+      el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Format'), segmented([['modern', 'Modern'], ['duo', 'Duo'], ['classic', 'Classic']], () => store.project.format || 'modern', (v) => A.setFormat(v))]),
+      el('p', { class: 'muted' }, {
+        modern: 'Modern (iOS 26/27): one ParameterizedCA bundle – values follow your finger, gyro, iOS 27 depth fix.',
+        duo: 'Duo (iPhone Duo foldable, iOS 27): your square scene is framed separately for the cover screen and the inner display (portrait + landscape), with gyro and depth.',
+        classic: 'Classic (iOS 17+): three LayeredAnimation bundles with spring transitions and Light/Dark states. Loses gyro on iOS 27.',
+      }[p.format || 'modern']),
+      modern ? numField('3D perspective', () => store.project.perspective || 900, (v) => P((pp) => (pp.perspective = Math.max(100, v)), 'persp'), { min: 200, max: 3000, step: 10, slider: true, unit: 'pt' }) : null,
       !modern ? toggleField('Light / Dark variants', () => store.project.appearanceAware, (v) => P((pp) => (pp.appearanceAware = v)), 'Adds Locked/Unlock/Sleep Light & Dark states') : null,
     ]),
     !modern ? section('Default spring', transitionFields(() => store.project.transition, (fn) => P((pp) => fn(pp.transition), 'ptr'))) : null,

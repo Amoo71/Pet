@@ -60,7 +60,8 @@ function mountStateBar() {
   const demo = el('button', { class: 'btn small', title: 'Play the unlock swipe', onclick: playUnlockDemo }, '▶ Unlock');
   const clock = el('button', { class: 'icon-btn toggle-btn', title: 'Show clock & UI', 'aria-label': 'Toggle clock', onclick: () => setView({ clock: !store.view.clock }) }, '🕘');
   const motion = el('button', { class: 'btn small', title: 'Use the phone’s motion sensor for parallax', onclick: async () => toast((await enableDeviceMotion()) ? 'Motion on – tilt your phone' : 'Motion sensor not available', 'info') }, '🧭 Motion');
-  bar.append(seg, scrubWrap, darkBtn, demo, motion, clock);
+  const posture = persistent(() => segmented([['cover', 'Cover'], ['inner', 'Inner'], ['land', 'Landscape']], () => store.view.posture || 'inner', (v) => setView({ posture: v }), 'posture'));
+  bar.append(seg, scrubWrap, posture, darkBtn, demo, motion, clock);
   subscribe(() => {
     runSyncs();
     const p = store.project;
@@ -70,6 +71,7 @@ function mountStateBar() {
     darkBtn.hidden = modern || !p?.appearanceAware;
     darkBtn.textContent = store.view.dark ? '🌙' : '☀️';
     motion.hidden = store.view.mode !== 'preview' || !modern;
+    posture.hidden = p?.format !== 'duo';
     clock.classList.toggle('on', store.view.clock);
     const dark = p?.appearanceAware && store.view.dark && !modern;
     $('#app').dataset.editing = store.view.state === 'Locked' && !dark ? 'base' : 'state';

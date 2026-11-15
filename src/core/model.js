@@ -23,7 +23,27 @@ export const ANIMATABLE = [
   { id: 'y', name: 'Y', keyPath: 'position.y', pcaKeyPath: 'position.y', step: 1 },
   { id: 'scale', name: 'Scale', keyPath: 'transform.scale', pcaKeyPath: 'transform.scale.xy', min: 0, max: 5, step: 0.01 },
   { id: 'rotation', name: 'Rotation', keyPath: 'transform.rotation.z', pcaKeyPath: 'transform.rotation.z', min: -720, max: 720, step: 1 },
+  { id: 'rotX', name: '3D tilt X', keyPath: 'transform.rotation.x', pcaKeyPath: 'transform.rotation.x', min: -180, max: 180, step: 1 },
+  { id: 'rotY', name: '3D tilt Y', keyPath: 'transform.rotation.y', pcaKeyPath: 'transform.rotation.y', min: -180, max: 180, step: 1 },
 ];
+
+/** Gyro effects per layer. move = translation (device-verified); tilt & fade are experimental. */
+export const DEFAULT_GYRO = { tilt: 0, fade: 'none', fadeMin: 0, fadeMax: 1 };
+
+/** iPhone Duo (foldable) screens – Apple's numbers from the iOS 27 Clownfish-V68 wallpaper. */
+export const DUO = {
+  root: 6000,
+  ppt: 3,
+  screens: {
+    cover: { key: 'TWO', screenName: 'Cover Screen', idealWidth: 466, idealHeight: 678, pixelWidth: 1398, pixelHeight: 2034, pixelParallaxBleed: 64, pixelSquareWithParallax: 3553, pixelSquareWithoutParallax: 3489 },
+    inner: { key: 'ONE', screenName: 'Inner Display', idealWidth: 669, idealHeight: 951, pixelWidth: 2007, pixelHeight: 2853, pixelParallaxBleed: 119, pixelSquareWithParallax: 3608, pixelSquareWithoutParallax: 3489 },
+  },
+  postures: {
+    cover: { name: 'Cover', w: 466, h: 678 },
+    inner: { name: 'Inner', w: 669, h: 951 },
+    land: { name: 'Inner landscape', w: 951, h: 669 },
+  },
+};
 
 export const KINDS = {
   image: { name: 'Image', icon: '🖼️' },
@@ -124,7 +144,8 @@ export function newProject(deviceId = 'iphone-17-pro', device = { w: 402, h: 874
     id: uid('p'),
     name: 'My Wallpaper',
     device: deviceId,
-    format: 'modern', // modern = ParameterizedCA (iOS 26/27, gyro, swipe-follow) | classic = LayeredAnimation
+    format: 'modern', // modern = ParameterizedCA (iOS 26/27) | duo = iPhone Duo split screens (iOS 27) | classic = LayeredAnimation
+    perspective: 900, // pt, for 3D tilt
     appearanceAware: false,
     transition: { ...TRANSITION_PRESETS.gentle, preset: 'gentle' },
     created: Date.now(),
@@ -153,6 +174,8 @@ export function newLayer(kind, project, props = {}) {
     opacity: 1,
     scale: 1,
     rotation: 0,
+    rotX: 0,
+    rotY: 0,
     cornerRadius: 0,
     hidden: false,
     locked: false,
@@ -160,6 +183,8 @@ export function newLayer(kind, project, props = {}) {
     states: {},
     anims: [],
     parallax: 0,
+    gyro: { ...DEFAULT_GYRO },
+    fastFade: false,
     blend: 'normal',
     filters: { ...DEFAULT_FILTERS },
     transition: null,
@@ -230,7 +255,7 @@ export const stateKey = (state, dark) => (dark ? `${state}@dark` : state);
 /** Effective animatable values of a layer for a given state + appearance. */
 export function effective(layer, state = 'Locked', dark = false) {
   const out = {};
-  for (const p of ANIMATABLE) out[p.id] = layer[p.id];
+  for (const p of ANIMATABLE) out[p.id] = layer[p.id] ?? 0;
   const s = layer.states || {};
   if (dark) Object.assign(out, s['Locked@dark'] || {});
   if (state === 'Sleep') Object.assign(out, s.Locked || {});
@@ -261,6 +286,8 @@ export function animatedProps(layer, appearanceAware) {
   return [...props].filter((p) => ANIMATABLE.some((a) => a.id === p));
 }
 
+export const isGyro = (layer) => layer.parallax > 0 || layer.gyro?.tilt > 0 || (layer.gyro?.fade && layer.gyro.fade !== 'none');
+
 export const hasLoops = (layer) => (layer.anims || []).some((a) => a.enabled !== false && a.repeat !== 'once') || layer.kind === 'emitter' || (layer.kind === 'video' && (layer.video?.frames?.length || 0) > 1);
 
 export function clone(o) {
@@ -285,9 +312,14 @@ export function migrateProject(p) {
     }
     delete l.loop;
     l.parallax ??= 0;
+    l.rotX ??= 0;
+    l.rotY ??= 0;
+    l.gyro = { ...DEFAULT_GYRO, ...(l.gyro || {}) };
+    l.fastFade ??= false;
     l.blend ??= 'normal';
     l.filters = { ...DEFAULT_FILTERS, ...(l.filters || {}) };
   }
-  p.v = 2;
+  p.perspective ??= 900;
+  p.v = 3;
   return p;
 }

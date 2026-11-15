@@ -397,6 +397,14 @@ export function changeDevice(id) {
   });
 }
 
+export function setFormat(v) {
+  const p = store.project;
+  if (p.format === v) return;
+  if (v === 'duo' && p.device !== 'iphone-duo') changeDevice('iphone-duo');
+  if (v !== 'duo' && p.device === 'iphone-duo') changeDevice(guessDevice() === 'iphone-duo' ? 'iphone-17-pro' : guessDevice());
+  update((pp) => (pp.format = v));
+}
+
 export function addAnimation(layerId, preset = 'float') {
   update((p) => p.layers.find((l) => l.id === layerId).anims.push(newAnim(preset)));
 }
@@ -422,6 +430,7 @@ export function openExport() {
   const body = el('div', { class: 'export' }, [
     el('div', { class: 'format-cards' }, [
       formatCard('modern', 'Modern', 'iOS 26 / 27', ['Follows your finger when swiping', 'Gyro parallax', 'iOS 27 depth fix (Clownfish)', 'Liquid Glass'], opts),
+      formatCard('duo', 'Duo', 'iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Apple’s split-screen schema'], opts),
       formatCard('classic', 'Classic', 'iOS 17 – 26', ['Spring animation after unlock', 'Light / Dark variants', 'Most compatible with older tools'], opts),
     ]),
     selectField('Quality', [[3, 'Best (@3x)'], [2, 'Performance (@2x, smaller)']], () => opts.scale, (v) => ((opts.scale = Number(v)), refreshMem())),
@@ -443,7 +452,7 @@ function formatCard(id, title, sub, bullets, opts) {
   card.addEventListener('click', () => {
     opts.format = id;
     card.parentNode.querySelectorAll('.format-card').forEach((c) => c.classList.toggle('on', c.dataset.format === id));
-    if (store.project.format !== id) update((pp) => (pp.format = id));
+    if (store.project.format !== id) setFormat(id);
   });
   return card;
 }
