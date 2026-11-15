@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Tendies Studio</title>
+  <meta name="description" content="Design animated iOS lock screen wallpapers (.tendies) for PosterBoard – swipe effects, gyro parallax, Liquid Glass, GIFs and more." />
+  <meta name="theme-color" content="#07070b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tendies" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" data-editing="base">
+    <header id="topbar"></header>
+    <main id="workspace">
+      <section id="canvasArea">
+        <div id="stage"></div>
+        <div id="statebar"></div>
+      </section>
+      <button id="panelToggle" class="panel-toggle" aria-label="Toggle panel"></button>
+      <aside id="panel"></aside>
+    </main>
+  </div>
+  <noscript>Tendies Studio needs JavaScript.</noscript>
+  <script type="module" src="src/app/main.js"></script>
+</body>
+</html>

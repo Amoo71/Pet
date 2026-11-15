@@ -1,0 +1,22 @@
+name: Tests
+
+# GitHub Pages serves this repository straight from the main branch
+# (Settings → Pages → Deploy from a branch). This workflow only runs the tests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tests/core.test.mjs test-out
