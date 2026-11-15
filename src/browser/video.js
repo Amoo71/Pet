@@ -8,7 +8,7 @@ export const FRAME_LIMIT = 400;
 function waitEvent(el, ev) {
   return new Promise((res, rej) => {
     const ok = () => (cleanup(), res());
-    const bad = () => (cleanup(), rej(el.error || new Error('Video konnte nicht geladen werden.')));
+    const bad = () => (cleanup(), rej(el.error || new Error('Could not load the video.')));
     const cleanup = () => {
       el.removeEventListener(ev, ok);
       el.removeEventListener('error', bad);
@@ -56,7 +56,7 @@ export async function extractFrames(file, o) {
     const ctx = c.getContext('2d');
     const frames = [];
     for (let i = 0; i < n; i++) {
-      if (o.signal?.aborted) throw new DOMException('Abgebrochen', 'AbortError');
+      if (o.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const t = Math.min(end - 0.001, start + i / fps);
       if (Math.abs(v.currentTime - t) > 0.0005) {
         v.currentTime = t;

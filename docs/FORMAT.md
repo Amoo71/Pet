@@ -1,128 +1,139 @@
-# Das `.tendies`-Format – Referenz
+# The `.tendies` format – reference
 
-Apple dokumentiert PosterBoard-Wallpaper nicht öffentlich. Dieses Dokument fasst zusammen, was Tendies Studio erzeugt, und woher jedes Detail stammt:
+Apple does not document PosterBoard wallpapers. This file records what Tendies Studio writes and where every detail comes from.
 
-- **[A] Apple, Core Animation** (offizielle Doku): `CALayer`, `CAKeyframeAnimation`, `CASpringAnimation`, `CAEmitterLayer`, *Key-Value Coding Extensions* (Key-Paths wie `position.x`, `transform.scale`, `transform.rotation.z`), Koordinatensystem (iOS: Ursprung oben links).
-- **[N] Nugget** `documentation.md`, `tendie_file.py`, `posterboard_tweak.py`, `video_handler.py` und die Vorlage `files/posterboard/VideoCAML` (github.com/leminlimez/Nugget).
-- **[P] Pocket Poster** (github.com/leminlimez/Pocket-Poster).
-- **[C] Community-Wallpaper**, auf iOS 27 getestet (z. B. github.com/xxzhil/unlock-tendies): Zustandsmaschine *Locked/Unlock/Sleep × Light/Dark* mit `CASpringAnimation`.
-- **[W] The Apple Wiki** – `Filesystem:/Applications/PosterBoard.app` (Hintergrund zu PosterBoard).
+**Sources**
 
-## Archiv
+- **[A] Apple – Core Animation** (official docs): `CALayer`, `CAKeyframeAnimation`, `CASpringAnimation`, `CAEmitterLayer`, key-value coding extensions (`position.x`, `transform.scale`, `transform.rotation.z` …).
+- **[K] tendies-wallpaper-skill** (iceorange-dev, MIT): ParameterizedCA engine + ~50 techniques, many **verified on iPhone (iOS 27)**, incl. measured battery usage. Our ParameterizedCA metadata comes from its template.
+- **[C] CAPlayground** – open-source web CA editor: CAML serializer for all layer types, Liquid Glass, filters, blend modes, gyro export.
+- **[L] PosterLab** (gerdaroot) – on-device editor writing ParameterizedCA; documents the y-up flip.
+- **[P] Placard** (frs0n, fork cxk203) – iOS 26–27 installer + video wallpapers (LayeredAnimation, ≤ 12 s).
+- **[N] Nugget / Pocket Poster** (leminlimez) – original tendies/batter format docs.
+- **[W] The Apple Wiki** – PosterBoard background.
 
-Eine `.tendies`-Datei ist ein ZIP. Tools erkennen zwei Layouts [N]:
+## Two wallpaper types
 
-| Ordner | Ziel | IDs |
+| | Modern – `ParameterizedCA` | Classic – `LayeredAnimation` |
 |---|---|---|
-| `descriptors/` (oder `descriptor/`) | `…/PRBPosterExtensionDataStore/<61\|59>/Extensions/com.apple.WallpaperKit.CollectionsPoster/descriptors` | UUID + Wallpaper-ID werden beim Installieren zufällig neu vergeben |
-| `ordered-descriptors/` | wie oben, Reihenfolge bleibt erhalten (absteigende IDs) | – |
-| `container/` | direkt in den PosterBoard-Container | unverändert (riskant) |
+| Bundles | one `.ca` | `_Background`, `_Floating`, `_Foreground` `.ca` |
+| States | `wallpaperPropertyGroups`: `v_lock`, `v_home`, `v_sleep` per (layer **name**, keyPath) | `LKState` `Locked` / `Unlock` / `Sleep` (+ `… Light` / `… Dark`) per layer **id** |
+| Transition | **linear interpolation following the swipe** (no spring) [K] | `CASpringAnimation` after the state is reached [K][C] |
+| Gyro | `wallpaperParallaxGroups` ✅ | lost on iOS 27 [K] |
+| Depth (iOS 27) | bundle name must contain `Clownfish` + rendering configuration [K] | – |
+| Light / Dark | unknown | `Locked Light` … `Sleep Dark` ✅ [C][community files] |
 
-Tendies Studio verwendet `descriptors/` bzw. für Sammlungen `ordered-descriptors/`. Nugget erlaubt max. 10 Descriptoren pro Vorgang [N].
-
-## Descriptor
-
-```
-descriptors/<UUID>/
-  com.apple.posterkit.role.identifier                 PRPosterRoleLockScreen
-  com.apple.posterkit.provider.descriptor.identifier  <Wallpaper-ID>
-  providerInfo.plist                                  NSKeyedArchiver {kConfigurationLastUseDateKey: NSDate}
-  versions/1/contents/
-    com.apple.posterkit.provider.contents.userInfo    {wallpaperRepresentingFileName, wallpaperRepresentingIdentifier, posterEnvironmentOverrides}
-    <ID>.<Name>-<Screen>.wallpaper/
-      Wallpaper.plist
-      <ID>.<Name>_Background-<Screen>.ca/
-      <ID>.<Name>_Floating-<Screen>.ca/
-      <ID>.<Name>_Foreground-<Screen>.ca/
-```
-
-Entspricht der Nugget-Vorlage `VideoCAML` [N] bzw. den Community-Dateien [C]. `<Screen>` ist die *logicalScreenClass*, z. B. `402w-874h@3x~iphone`.
-
-### Wallpaper.plist
+## Modern package (what we write)
 
 ```
-appearanceAware   Bool
-assets.lockAndHome.default:
-  type                           LayeredAnimation
-  backgroundAnimationFileName    …_Background-….ca
-  floatingAnimationFileNameKey   …_Floating-….ca      (sic, Schlüssel endet auf "Key")
-  foregroundAnimationFileName    …_Foreground-….ca
-  identifier, name
-identifier, name, family, logicalScreenClass, version, contentVersion, preferredProminentColor
+descriptors/<UUID>/                       UUID + identity derived from a SHA-256 of the content
+  com.apple.posterkit.role.identifier     PRPosterRoleLockScreen
+  com.apple.posterkit.provider.descriptor.identifier   <ident>
+  com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist   gallery id + "<ident>.DYNAMIC"
+  providerInfo.plist
+  versions/0/
+    com.apple.posterkit.provider.instance.renderingConfiguration.plist  depthEffectDisabled = motionEffectsDisabled = false
+    com.apple.posterkit.provider.instance.complicationLayout.plist
+    com.apple.posterkit.provider.instance.titleStyleConfiguration.plist
+    supplements/0/com.apple.posterkit.provider.supplementURL.homescreenConfiguration.plist
+    contents/
+      .com.apple.posterkit.provider.contents.configurableOptions.plist  hidden file! preferredRenderingConfiguration
+      com.apple.posterkit.provider.contents.otherMetadata.plist
+      com.apple.posterkit.provider.contents.userInfo
+      7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/
+        Wallpaper.plist          type ParameterizedCA, assetFileName, wantsDeviceMotion, logicalScreenClass "any"
+        <ident>.Clownfish_Gyro.ca/{main.caml, index.xml, assetManifest.caml, assets/…}
 ```
 
-## `.ca`-Paket
+Everything except `main.caml`, assets, `Wallpaper.plist`, `userInfo`, the descriptor identifier and the two strings in `suggestionMetadata` is copied byte-for-byte from the device-verified template [K]. Installers that drop hidden files lose the depth effect on iOS 27 [K].
 
-```
-main.caml           Ebenenbaum (Core Animation XML)
-index.xml           Plist: rootDocument=main.caml, documentWidth/Height …
-assetManifest.caml  <MicaAssetManifest> (leer)
-assets/             PNG/JPEG
-```
-
-### main.caml – was Tendies Studio schreibt
+### main.caml (modern)
 
 ```xml
 <caml xmlns="http://www.apple.com/CoreAnimation/1.0">
-  <CALayer id="root-floating" bounds="0 0 W H" position="W/2 H/2" geometryFlipped="0">
+  <CALayer id="__capRootLayer__" name="Root Layer" bounds="0 0 W H" position="W/2 H/2" geometryFlipped="0">
+    <style>
+      <wallpaperBackgroundAssetNames type="NSArray"/>
+      <wallpaperFloatingAssetNames type="NSArray"/>
+      <wallpaperParallaxGroups type="NSArray">
+        <NSDictionary>   <!-- one per axis -->
+          <axis type="string" value="x"/><image type="string" value="null"/>
+          <keyPath type="string" value="transform.translation.x"/>
+          <layerName type="string" value="Sun Parallax"/>
+          <mapMaxTo type="integer" value="8"/><mapMinTo type="integer" value="-8"/>
+          <title type="string" value="Gyro"/><view type="string" value="Background"/>
+        </NSDictionary>
+      </wallpaperParallaxGroups>
+      <wallpaperPropertyGroups type="NSArray">
+        <NSDictionary>
+          <image type="null"/><keyPath type="string" value="position.y"/>
+          <layerName type="string" value="Sun"/>
+          <v_home type="real" value="384"/><v_lock type="real" value="44"/><v_sleep type="real" value="44"/>
+          <view type="string" value="Background"/>
+        </NSDictionary>
+      </wallpaperPropertyGroups>
+    </style>
     <sublayers>
-      <!-- äußere Ebene: Geometrie + Zustandswerte -->
-      <CALayer id="L…" bounds="0 0 w h" position="x y" opacity="1">
-        <sublayers>
-          <!-- innere Ebene: Inhalt + Loop -->
-          <CALayer id="L…-content" contentsGravity="resizeAspectFill" masksToBounds="1">
-            <contents><CGImage src="assets/L….png"/></contents>
-            <animations>
-              <animation type="CAKeyframeAnimation" keyPath="position.y" calculationMode="cubic"
-                         beginTime="1e-100" duration="3" repeatCount="inf" autoreverses="1" removedOnCompletion="0">
-                <values><real value="437"/><real value="425"/></values>
-              </animation>
-            </animations>
-          </CALayer>
-        </sublayers>
-      </CALayer>
+      <CALayer id="background" name="BACKGROUND" …> … </CALayer>   <!-- under the clock -->
+      <CALayer id="floating" name="FLOATING" …> … </CALayer>       <!-- over the clock (depth) -->
     </sublayers>
-    <states>
-      <LKState name="Unlock"><elements>
-        <LKStateSetValue targetId="L…" keyPath="opacity"><value type="real" value="1"/></LKStateSetValue>
-      </elements></LKState>
-      …
-    </states>
-    <stateTransitions>
-      <LKStateTransition fromState="*" toState="Unlock"><elements>
-        <LKStateTransitionElement targetId="L…" key="opacity">
-          <animation type="CASpringAnimation" damping="50" mass="2" stiffness="300" duration="0.8"
-                     fillMode="backwards" keyPath="opacity" mica_autorecalculatesDuration="1"/>
-        </LKStateTransitionElement>
-      </elements></LKStateTransition>
-    </stateTransitions>
   </CALayer>
 </caml>
 ```
 
-Designentscheidungen:
+Verified state key paths [K]: `opacity`, `position.x`, `position.y`, `transform.scale.xy`, `transform.rotation.z` (radians), `hidden`. Opacity outside 0–1 is clamped.
 
-- **Alles wird zu Bitmaps gerastert** (Text, Verläufe, Formen). Ein `CALayer` mit `CGImage`-Inhalt ist das, was PosterBoard nachweislich auf allen Versionen rendert [C][N].
-- **Zwei Ebenen pro Layer**: Die äußere trägt die Zustandswerte, die innere den Loop. So können Zustand und Loop dieselbe Eigenschaft animieren, ohne sich zu überschreiben.
-- **Zustände**: Immer `Locked`, `Unlock`, `Sleep` [N]; mit Hell/Dunkel zusätzlich `Locked Light` … `Sleep Dark` [C]. PosterBoard wählt den Zustand selbst.
-- **Key-Paths** aus Apples KVC-Erweiterungen [A]: `opacity`, `position.x`, `position.y`, `transform.scale`, `transform.rotation.z` (Radiant).
-- **Grund-Drehung/-Skalierung** werden als Zustandswerte geschrieben (statt als `transform`-Matrix), weil deren CAML-Serialisierung nicht belegt ist.
-- **Video**: `CAKeyframeAnimation` auf `contents` mit einer `CGImage`-Liste, `calculationMode="discrete"`, max. 400 Frames – wie Nugget [N].
-- **Koordinaten**: Punkte (nicht Pixel), Ursprung oben links (iOS-Standard [A]), Assets in @3x.
-- **Partikel** (`CAEmitterLayer`/`CAEmitterCell`) folgen den Property-Namen aus [A]; in der Community kaum erprobt → als experimentell markiert.
+## One editor layer → CAML
 
-## Nugget-Vorlagen (`.batter`)
+```
+[CATransformLayer "<name> Parallax"]   modern only, gyro target (full canvas)
+  CALayer "<name>"  id=<layer id>      position, opacity, transform="rotate(…deg) scale(s, s, 1)",
+                                        compositingFilter (blend), filters (blur/hue/saturate/contrast),
+                                        state values target this layer
+    CALayer "<name> Anim 1"            one nested layer per animation (CAKeyframeAnimation + keyTimes)
+      CALayer "<name> Anim 2" …
+        content: CALayer + CGImage | frame sequence | CAEmitterLayer | CABackdropLayer (glass)
+```
 
-ZIP mit `config.json` + `descriptors/…` [N]. Tendies Studio erzeugt für jede als „In Nugget anpassbar“ markierte Ebene:
+- **Names are unique** – ParameterizedCA matches groups by name [K].
+- **States and animations never share a layer**: an animation on the same layer + keyPath overrides the state value [K]. Nesting keeps both.
+- **y axis points up**: CAML roots use `geometryFlipped="0"` → y = H − y, rotation = −rotation, emitter directions flipped [L][K][C].
+- Loops: `beginTime="1e-100"`, `repeatCount="inf"`, `repeatDuration="inf"`; play-once: `repeatCount="1" fillMode="both"`. `position.x/y` values as `<integer>` [C].
+- Frame sequences: `CAKeyframeAnimation keyPath="contents"` with `<CGImage>` values (frames may repeat for exact GIF timing), ≤ 400 frames [N].
+- Blend modes: `<compositingFilter type="CAFilter" filter="screenBlendMode"/>` [C]; filters `gaussianBlur (inputRadius)`, `colorHueRotate (inputAngle)`, `colorSaturate / colorContrast (inputAmount)` [C].
 
-- `replace` – Bild austauschen (nur Bild-Ebenen),
-- `set` / `slider` – `opacity` über `nuggetId`,
-- `set` / `toggle` – `hidden`.
+### Glass
 
-`format_version: "2"`, `domain: "AppDomain-com.apple.PosterBoard"`.
+| Mode | CAML | Notes |
+|---|---|---|
+| Frosted (default) | blurred backdrop + tint + rim **baked into a PNG** at export | works on every iOS; doesn't follow layers that move behind it |
+| Liquid Glass | `CABackdropLayer` + `displacementMap` filter (`inputSourceSublayerName="sdfLayer"`) + `CASDFLayer` with `CASDFGlassDisplacementEffect` + `CASDFElementLayer` (corner radius) [C] | iOS 26+, live refraction, experimental |
+| Live blur | `CABackdropLayer` + `gaussianBlur` + `colorSaturate` filters | experimental |
 
-## Bekannte Grenzen
+A rim/tint/shine PNG is layered on top of Liquid Glass and Live blur.
 
-- PosterBoard-Wallpaper sind kein offizielles Apple-Feature; Installer hängen von der iOS-Version ab.
-- Auf dem Gerät erzeugt PosterBoard Parallax/Perspektive selbst – die Vorschau zeigt sie nicht.
-- Import liest Bild-/Video-Ebenen und Zustandswerte; Partikel, Loops und Script-Komponenten fremder Dateien werden nicht übernommen.
+## Classic package
+
+`descriptors/<UUID>/versions/1/contents/<id>.<Name>-<screenClass>.wallpaper/` with `Wallpaper.plist` (`type LayeredAnimation`, `backgroundAnimationFileName`, `floatingAnimationFileNameKey` *(sic)*, `foregroundAnimationFileName`) and one `.ca` per plane, each with `LKState`/`LKStateTransition`. Every state lists every animated property (CAPlayground notes transitions break otherwise) [C]. Collections of classic wallpapers use `ordered-descriptors/` [N].
+
+## Nugget templates (`.batter`)
+
+`config.json` + descriptor tree [N]. Layers marked *Customizable in Nugget* get `nuggetId` and options: `replace` (images), `set`/`slider` (opacity), `set`/`toggle` (hidden).
+
+## Performance (measured on device) [K]
+
+| Wallpaper | backboardd CPU, idle |
+|---|---|
+| static | ~5 % |
+| one 29 pt spinning star | ~26 % |
+| full loop animations | 32–38 % |
+| swipe-only motion (no loops) | ~4 % |
+
+Anything that moves forever forces full redraws. Tendies Studio warns about loops, particles and multi-frame videos. Keep decoded image memory under ~80 MB.
+
+## Limits & unknowns
+
+- Not an official Apple feature; installers depend on iOS version and exploits.
+- Liquid Glass, live blur and particles are written exactly like CAPlayground but have little device testing.
+- Light/Dark in ParameterizedCA is not known to work, so it's Classic only.
+- Import reads images, frame sequences, glass, blend/blur, states and parallax; particles, scripts and foreign animations are skipped.

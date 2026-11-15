@@ -1,5 +1,5 @@
-// Offline support: cache-first for the app shell, refreshed in the background.
-const CACHE = 'tendies-studio-v1';
+// Offline support: network-first for app files, cached copy as offline fallback.
+const CACHE = 'tendies-studio-v2';
 const SHELL = [
   './',
   './index.html',
@@ -24,6 +24,10 @@ const SHELL = [
   './src/core/plist.js',
   './src/core/zip.js',
   './src/core/devices.js',
+  './src/core/bplist.js',
+  './src/core/template-data.js',
+  './src/browser/gif.js',
+  './src/browser/gifsearch.js',
   './src/browser/raster.js',
   './src/browser/storage.js',
   './src/browser/video.js',
@@ -42,17 +46,17 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
+  // network-first for the app code so updates arrive immediately, cache as offline fallback
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      const hit = await cache.match(req, { ignoreSearch: true });
-      const net = fetch(req)
-        .then((res) => {
-          if (res.ok) cache.put(req, res.clone());
-          return res;
-        })
-        .catch(() => hit);
-      return hit || net;
+      try {
+        const res = await fetch(req);
+        if (res.ok) cache.put(req, res.clone());
+        return res;
+      } catch {
+        return (await cache.match(req, { ignoreSearch: true })) || Response.error();
+      }
     })
   );
 });

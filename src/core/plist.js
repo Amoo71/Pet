@@ -92,7 +92,7 @@ function parseXmlNode(el) {
   }
 }
 
-function parseBinary(bytes) {
+function parseBinary(bytes, typed = false) {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tr = bytes.length - 32;
   const offSize = bytes[tr + 6];
@@ -127,8 +127,10 @@ function parseBinary(bytes) {
         if (n === 8) return Number(v.getBigInt64(p + 1));
         return readN(p + 1, n);
       }
-      case 0x2:
-        return lo === 3 ? v.getFloat64(p + 1) : v.getFloat32(p + 1);
+      case 0x2: {
+        const f = lo === 3 ? v.getFloat64(p + 1) : v.getFloat32(p + 1);
+        return typed ? { __plist: 'real', v: f } : f;
+      }
       case 0x3:
         return new Date((978307200 + v.getFloat64(p + 1)) * 1000);
       case 0x4: {
@@ -146,7 +148,7 @@ function parseBinary(bytes) {
         return str;
       }
       case 0x8:
-        return { CF$UID: readN(p + 1, lo + 1) };
+        return typed ? { __plist: 'uid', v: readN(p + 1, lo + 1) } : { CF$UID: readN(p + 1, lo + 1) };
       case 0xa: {
         const [l, s] = len();
         const arr = [];
@@ -170,10 +172,10 @@ function parseBinary(bytes) {
 }
 
 /** Parse an XML or binary plist. */
-export function parsePlist(input) {
+export function parsePlist(input, typed = false) {
   const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
   const head = new TextDecoder().decode(bytes.subarray(0, 8));
-  if (head === 'bplist00') return parseBinary(bytes);
+  if (head === 'bplist00') return parseBinary(bytes, typed);
   const text = new TextDecoder().decode(bytes);
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   const root = doc.querySelector('plist > *');

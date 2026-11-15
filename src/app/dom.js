@@ -192,7 +192,7 @@ export function modal(title, content, actions = []) {
   const close = () => back.remove();
   const back = el('div', { class: 'modal-back', onclick: (e) => e.target === back && close() }, [
     el('div', { class: 'modal', role: 'dialog', 'aria-label': title }, [
-      el('div', { class: 'modal-head' }, [el('h2', {}, title), el('button', { class: 'icon-btn', 'aria-label': 'Schließen', onclick: close }, '✕')]),
+      el('div', { class: 'modal-head' }, [el('h2', {}, title), el('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, '✕')]),
       el('div', { class: 'modal-body' }, content),
       actions.length ? el('div', { class: 'modal-actions' }, actions.map(([t, fn, cls]) => button(t, () => fn(close), cls))) : null,
     ]),
@@ -206,7 +206,7 @@ export function progressModal(title) {
   const label = el('p', { class: 'muted' }, '…');
   let aborted = false;
   const ctrl = new AbortController();
-  const close = modal(title, [label, bar], [['Abbrechen', (c) => (ctrl.abort(), (aborted = true), c())]]);
+  const close = modal(title, [label, bar], [['Cancel', (c) => (ctrl.abort(), (aborted = true), c())]]);
   return {
     signal: ctrl.signal,
     set(i, n, text) {

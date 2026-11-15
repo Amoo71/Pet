@@ -1,5 +1,5 @@
 // Central app state with undo/redo and debounced autosave.
-import { clone } from '../core/model.js';
+import { clone, migrateProject } from '../core/model.js';
 import { getDevice } from '../core/devices.js';
 import { saveProject } from '../browser/storage.js';
 
@@ -13,8 +13,9 @@ export const store = {
     state: 'Locked',
     dark: false,
     clock: true,
-    guides: true,
     tab: 'layers',
+    mode: 'edit', // edit | preview
+    progress: 0, // 0 = Lock … 1 = Home (swipe scrub)
     zoom: 0, // 0 = fit
   },
   undo: [],
@@ -48,6 +49,7 @@ export function flushSave() {
 }
 
 export function setProject(p) {
+  if ((p.v || 1) < 2) migrateProject(p);
   const d = getDevice(p.device);
   p._w = d.w;
   p._h = d.h;

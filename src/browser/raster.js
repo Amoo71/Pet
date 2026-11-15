@@ -12,7 +12,7 @@ export function makeCanvas(w, h) {
 }
 
 export const canvasToBlob = (c, type = 'image/png', q = 0.92) =>
-  new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Canvas-Export fehlgeschlagen'))), type, q));
+  new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Canvas export failed'))), type, q));
 
 function pxSize(layer, scale) {
   let w = layer.w * scale;
@@ -205,6 +205,9 @@ export function renderParticleCanvas(kind = 'dot') {
       ctx.arc(24, 22, 6, 0, Math.PI * 2);
       ctx.fill();
       break;
+    case 'square':
+      ctx.fillRect(18, 10, 28, 44);
+      break;
     case 'petal':
       ctx.beginPath();
       ctx.ellipse(32, 32, 14, 26, 0.6, 0, Math.PI * 2);
@@ -219,6 +222,60 @@ export function renderParticleCanvas(kind = 'dot') {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, 64, 64);
     }
+  }
+  return c;
+}
+
+/**
+ * Glass rim: tint + inner border highlight + top shine, drawn over a (baked or live) blurred backdrop.
+ * @param {CanvasImageSource|null} backdrop  pre-cropped backdrop (baked frosted glass) or null
+ */
+export function renderGlassCanvas(layer, scale = 3, backdrop = null) {
+  const g = layer.glass || {};
+  const [W, H] = pxSize(layer, scale);
+  const s = W / layer.w;
+  const c = makeCanvas(W, H);
+  const ctx = c.getContext('2d');
+  const r = Math.min((layer.cornerRadius || 0) * s, W / 2, H / 2);
+  const clip = () => {
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(0, 0, W, H, r) : ctx.rect(0, 0, W, H);
+  };
+  ctx.save();
+  clip();
+  ctx.clip();
+  if (backdrop) {
+    const pad = (g.blur || 0) * s * 2;
+    ctx.filter = `blur(${(g.blur || 0) * s}px) saturate(${g.saturation ?? 1.4})`;
+    ctx.drawImage(backdrop, -pad, -pad, W + pad * 2, H + pad * 2);
+    ctx.filter = 'none';
+  }
+  // tint
+  ctx.globalAlpha = g.tintOpacity ?? 0.15;
+  ctx.fillStyle = g.tint || '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  // top shine
+  if (g.shine) {
+    const sh = ctx.createLinearGradient(0, 0, 0, H);
+    sh.addColorStop(0, `rgba(255,255,255,${0.55 * g.shine})`);
+    sh.addColorStop(0.45, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sh;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+  // rim (brighter top-left, darker bottom-right like iOS glass)
+  if (g.border) {
+    const lw = Math.max(1, 1.2 * s);
+    const rim = ctx.createLinearGradient(0, 0, W, H);
+    rim.addColorStop(0, `rgba(255,255,255,${0.9 * g.border})`);
+    rim.addColorStop(0.5, `rgba(255,255,255,${0.15 * g.border})`);
+    rim.addColorStop(1, `rgba(255,255,255,${0.6 * g.border})`);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = rim;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(lw / 2, lw / 2, W - lw, H - lw, Math.max(0, r - lw / 2)) : ctx.rect(lw / 2, lw / 2, W - lw, H - lw);
+    ctx.stroke();
   }
   return c;
 }
@@ -240,6 +297,8 @@ export function contentSignature(layer) {
       return `pt:${layer.emitter?.particle}:${layer.emitter?.particleAsset || ''}`;
     case 'video':
       return `vid:${(layer.video?.frames || []).join(',')}`;
+    case 'glass':
+      return `gls:${layer.w}x${layer.h}:${layer.cornerRadius}:${JSON.stringify(layer.glass)}`;
     default:
       return layer.kind;
   }

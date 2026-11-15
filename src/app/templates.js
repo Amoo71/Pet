@@ -1,93 +1,134 @@
-// Starter templates – built from vector layers only, so they work offline and
-// show off states, appearance variants, loops and particles.
-import { newLayer, EMITTER_PRESETS } from '../core/model.js';
+// Starter templates – vector layers only, so they work offline. Most are battery-friendly:
+// motion comes from the swipe (state values) and the gyro instead of endless loops.
+import { newLayer, newAnim, EMITTER_PRESETS } from '../core/model.js';
 
 const grad = (angle, ...stops) => ({ type: 'linear', angle, stops: stops.map(([c, p]) => ({ c, p })) });
+const radial = (...stops) => ({ type: 'radial', angle: 0, stops: stops.map(([c, p]) => ({ c, p })) });
 
 export const TEMPLATES = [
   {
     id: 'sunrise',
-    name: 'Sonnenaufgang beim Entsperren',
-    desc: 'Die Sonne steigt beim Entsperren auf, der Himmel wird hell.',
+    icon: '🌅',
+    name: 'Sunrise unlock',
+    desc: 'Swipe up and the sun rises with your finger. Gyro depth, zero loops.',
     build(p) {
-      p.name = 'Sonnenaufgang';
+      p.name = 'Sunrise';
       const W = p._w, H = p._h;
-      const night = newLayer('gradient', p, { name: 'Nachthimmel', gradient: grad(180, ['#0b1030', 0], ['#2a2160', 0.6], ['#6b3a6e', 1]) });
-      const day = newLayer('gradient', p, { name: 'Taghimmel', gradient: grad(180, ['#5fb4ff', 0], ['#ffd29a', 0.75], ['#ff9a6b', 1]), opacity: 0, states: { Unlock: { opacity: 1 } } });
-      const sun = newLayer('shape', p, { name: 'Sonne', plane: 'background', w: W * 0.55, h: W * 0.55, x: W / 2, y: H * 0.95, shape: { type: 'ellipse', fill: '#ffcf5a', stroke: '#fff', strokeWidth: 0, points: 5, blur: 6 }, states: { Unlock: { y: H * 0.58, scale: 1.1 }, Sleep: { opacity: 0.4 } } });
-      const hills = newLayer('shape', p, { name: 'Hügel', plane: 'floating', w: W * 1.6, h: H * 0.42, x: W / 2, y: H * 0.98, shape: { type: 'ellipse', fill: '#1d2a1f', stroke: '#000', strokeWidth: 0, points: 5, blur: 0 } });
-      const stars = newLayer('emitter', p, { name: 'Sterne', plane: 'background', h: H * 0.6, y: H * 0.3, emitter: { preset: 'stars', ...EMITTER_PRESETS.stars }, states: { Unlock: { opacity: 0 } } });
-      p.layers.push(night, day, stars, sun, hills);
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Night sky', gradient: grad(180, ['#0b1030', 0], ['#2a2160', 0.6], ['#6b3a6e', 1]), parallax: 4, w: W + 40, h: H + 40 }),
+        newLayer('gradient', p, { name: 'Day sky', gradient: grad(180, ['#5fb4ff', 0], ['#ffd29a', 0.75], ['#ff9a6b', 1]), opacity: 0, states: { Unlock: { opacity: 1 } }, parallax: 4, w: W + 40, h: H + 40 }),
+        newLayer('shape', p, { name: 'Sun', plane: 'background', w: W * 0.55, h: W * 0.55, x: W / 2, y: H * 0.95, shape: { type: 'ellipse', fill: '#ffcf5a', stroke: '#fff', strokeWidth: 0, points: 5, blur: 6 }, states: { Unlock: { y: H * 0.56, scale: 1.1 }, Sleep: { opacity: 0.35 } }, parallax: 8 }),
+        newLayer('shape', p, { name: 'Far hills', plane: 'background', w: W * 1.7, h: H * 0.36, x: W * 0.3, y: H * 0.98, shape: { type: 'ellipse', fill: '#2c3b35', stroke: '#000', strokeWidth: 0, points: 5, blur: 0 }, parallax: 10, states: { Unlock: { y: H * 1.0 } } }),
+        newLayer('shape', p, { name: 'Near hill', plane: 'floating', w: W * 1.6, h: H * 0.42, x: W * 0.75, y: H * 1.03, shape: { type: 'ellipse', fill: '#18241c', stroke: '#000', strokeWidth: 0, points: 5, blur: 0 }, parallax: 18, states: { Unlock: { y: H * 1.08 } } })
+      );
     },
   },
   {
-    id: 'daynight',
-    name: 'Tag & Nacht (Hell/Dunkel)',
-    desc: 'Reagiert auf den Erscheinungsmodus von iOS und auf das Entsperren.',
+    id: 'liquid',
+    icon: '💧',
+    name: 'Liquid Glass card',
+    desc: 'iOS 26 Liquid Glass panel floating over colour blobs; lifts on unlock.',
     build(p) {
-      p.name = 'Tag & Nacht';
-      p.appearanceAware = true;
+      p.name = 'Liquid Glass';
       const W = p._w, H = p._h;
-      const bg = newLayer('gradient', p, { name: 'Himmel', gradient: grad(170, ['#9ad7ff', 0], ['#e8f6ff', 1]) });
-      const bgDark = newLayer('gradient', p, { name: 'Himmel Nacht', gradient: grad(170, ['#05081c', 0], ['#1a2350', 1]), opacity: 0, states: { 'Locked@dark': { opacity: 1 } } });
-      const orb = newLayer('shape', p, { name: 'Sonne / Mond', plane: 'background', w: 150, h: 150, x: W * 0.72, y: H * 0.33, shape: { type: 'ellipse', fill: '#ffd34d', stroke: '#fff', strokeWidth: 0, points: 5, blur: 2 }, states: { Unlock: { scale: 1.25, y: H * 0.3 }, 'Locked@dark': { opacity: 0.85 } } });
-      orb.loop = { type: 'pulse', duration: 3, amount: 6, autoreverse: true };
-      const city = newLayer('shape', p, { name: 'Stadt', plane: 'floating', w: W * 1.2, h: H * 0.3, x: W / 2, y: H * 0.93, shape: { type: 'rect', fill: '#26324a', stroke: '#000', strokeWidth: 0, points: 5, blur: 0 } });
-      const sparkle = newLayer('emitter', p, { name: 'Sterne', plane: 'background', h: H * 0.6, y: H * 0.3, emitter: { preset: 'stars', ...EMITTER_PRESETS.stars }, opacity: 0, states: { 'Locked@dark': { opacity: 1 } } });
-      p.layers.push(bg, bgDark, sparkle, orb, city);
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Backdrop', gradient: grad(150, ['#12052e', 0], ['#2b1066', 0.5], ['#04132e', 1]), parallax: 4, w: W + 40, h: H + 40 }),
+        newLayer('shape', p, { name: 'Blob pink', w: 300, h: 300, x: W * 0.25, y: H * 0.62, shape: { type: 'ellipse', fill: '#ff4fa3', stroke: '#fff', strokeWidth: 0, points: 5, blur: 30 }, parallax: 10, states: { Unlock: { x: W * 0.35, y: H * 0.45 } } }),
+        newLayer('shape', p, { name: 'Blob blue', w: 340, h: 340, x: W * 0.8, y: H * 0.78, shape: { type: 'ellipse', fill: '#38b6ff', stroke: '#fff', strokeWidth: 0, points: 5, blur: 30 }, parallax: 12, states: { Unlock: { x: W * 0.65, y: H * 0.6 } } }),
+        newLayer('shape', p, { name: 'Blob gold', w: 200, h: 200, x: W * 0.62, y: H * 0.42, shape: { type: 'ellipse', fill: '#ffcc4d', stroke: '#fff', strokeWidth: 0, points: 5, blur: 24 }, parallax: 8 }),
+        newLayer('glass', p, { name: 'Glass card', y: H * 0.7, h: 170, cornerRadius: 44, glass: { mode: 'liquid', blur: 3, tint: '#ffffff', tintOpacity: 0.08, border: 0.6, saturation: 1.6, shine: 0.4, refraction: 90 }, parallax: 16, states: { Unlock: { y: H * 0.55, scale: 1.04 }, Sleep: { opacity: 0 } } }),
+        newLayer('text', p, { name: 'Caption', y: H * 0.7, h: 80, text: { content: 'liquid glass', font: 'ui-rounded, system-ui', weight: 600, size: 34, color: '#ffffff', align: 'center', lineHeight: 1.1, letterSpacing: 1, italic: false, shadow: 0.2, fontAsset: null }, parallax: 16, states: { Unlock: { y: H * 0.55, scale: 1.04 }, Sleep: { opacity: 0 } } })
+      );
+    },
+  },
+  {
+    id: 'frosted',
+    icon: '🫧',
+    name: 'Frosted widget',
+    desc: 'Glassmorphism panel (baked blur – works on every iOS) over an aurora.',
+    build(p) {
+      p.name = 'Frosted';
+      const W = p._w, H = p._h;
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Aurora', gradient: grad(200, ['#001a2c', 0], ['#00594f', 0.45], ['#2d1b69', 1]), parallax: 4, w: W + 40, h: H + 40 }),
+        newLayer('shape', p, { name: 'Glow', w: W * 1.2, h: 260, x: W / 2, y: H * 0.5, rotation: -18, shape: { type: 'ellipse', fill: '#3dffc2', stroke: '#fff', strokeWidth: 0, points: 5, blur: 50 }, opacity: 0.75, parallax: 8, states: { Unlock: { rotation: 10, opacity: 0.5 } } }),
+        newLayer('glass', p, { name: 'Frosted panel', y: H * 0.74, h: 190, cornerRadius: 38, glass: { mode: 'frosted', blur: 24, tint: '#ffffff', tintOpacity: 0.12, border: 0.5, saturation: 1.6, shine: 0.3, refraction: 80 }, parallax: 12, states: { Unlock: { y: H * 0.86, opacity: 0.0 } } }),
+        newLayer('text', p, { name: 'Quote', y: H * 0.74, h: 140, w: W - 90, text: { content: 'stay curious', font: 'ui-serif, Georgia, serif', weight: 500, size: 38, color: '#ffffff', align: 'center', lineHeight: 1.1, letterSpacing: 0, italic: true, shadow: 0.25, fontAsset: null }, parallax: 12, states: { Unlock: { y: H * 0.86, opacity: 0 } } })
+      );
+    },
+  },
+  {
+    id: 'depth',
+    icon: '🧍',
+    name: 'Depth photo',
+    desc: 'Background photo + cut-out subject in front of the clock. Replace both with your images.',
+    build(p) {
+      p.name = 'Depth photo';
+      const W = p._w, H = p._h;
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Background (replace)', gradient: radial(['#ff9a8b', 0], ['#4d2c6f', 1]), parallax: 5, w: W + 40, h: H + 40, states: { Unlock: { scale: 1.08 }, Sleep: { opacity: 0.35 } } }),
+        newLayer('shape', p, { name: 'Subject (replace with PNG cut-out)', plane: 'floating', w: W * 0.8, h: H * 0.62, y: H * 0.72, shape: { type: 'rounded', fill: '#1b1b2b', stroke: '#fff', strokeWidth: 0, points: 5, blur: 0 }, parallax: 16, states: { Unlock: { scale: 0.92, y: H * 0.8 }, Sleep: { y: H * 0.86, scale: 0.85 } } })
+      );
     },
   },
   {
     id: 'snow',
-    name: 'Schneenacht',
-    desc: 'Partikel-Schnee, der beim Entsperren dichter wird.',
+    icon: '❄️',
+    name: 'Snow night',
+    desc: 'Particle snow (loops – uses more battery).',
     build(p) {
-      p.name = 'Schneenacht';
+      p.name = 'Snow night';
       const W = p._w, H = p._h;
       p.layers.push(
-        newLayer('gradient', p, { name: 'Nacht', gradient: grad(180, ['#0d1b2a', 0], ['#1b263b', 0.6], ['#415a77', 1]) }),
-        newLayer('shape', p, { name: 'Mond', plane: 'background', w: 110, h: 110, x: W * 0.75, y: H * 0.36, shape: { type: 'ellipse', fill: '#f4f1de', stroke: '#fff', strokeWidth: 0, points: 5, blur: 1 } }),
-        newLayer('shape', p, { name: 'Schneedecke', plane: 'floating', w: W * 1.5, h: H * 0.25, x: W / 2, y: H * 1.02, shape: { type: 'ellipse', fill: '#e9f1f7', stroke: '#fff', strokeWidth: 0, points: 5, blur: 0 } }),
-        newLayer('emitter', p, { name: 'Schnee', plane: 'floating', emitter: { preset: 'snow', ...EMITTER_PRESETS.snow }, states: { Sleep: { opacity: 0.3 } } })
+        newLayer('gradient', p, { name: 'Night', gradient: grad(180, ['#0d1b2a', 0], ['#1b263b', 0.6], ['#415a77', 1]), parallax: 4, w: W + 40, h: H + 40 }),
+        newLayer('shape', p, { name: 'Moon', plane: 'background', w: 110, h: 110, x: W * 0.75, y: H * 0.36, shape: { type: 'ellipse', fill: '#f4f1de', stroke: '#fff', strokeWidth: 0, points: 5, blur: 1 }, parallax: 6 }),
+        newLayer('shape', p, { name: 'Snow bank', plane: 'floating', w: W * 1.5, h: H * 0.25, x: W / 2, y: H * 1.02, shape: { type: 'ellipse', fill: '#e9f1f7', stroke: '#fff', strokeWidth: 0, points: 5, blur: 0 }, parallax: 14 }),
+        newLayer('emitter', p, { name: 'Snow', plane: 'floating', emitter: { preset: 'snow', ...EMITTER_PRESETS.snow }, states: { Sleep: { opacity: 0 } } })
       );
     },
   },
   {
     id: 'neon',
-    name: 'Neon-Puls',
-    desc: 'Leuchtender Text, rotierender Ring, Zoom beim Entsperren.',
+    icon: '🌀',
+    name: 'Neon pulse',
+    desc: 'Glowing text, spinning ring, zoom on unlock (loops).',
     build(p) {
       p.name = 'Neon';
       const W = p._w, H = p._h;
-      const ring = newLayer('shape', p, { name: 'Ring', plane: 'background', w: W * 0.8, h: W * 0.8, y: H * 0.55, shape: { type: 'ring', fill: '#ff2bd6', stroke: '#fff', strokeWidth: 10, points: 5, blur: 3 }, states: { Unlock: { scale: 1.6, opacity: 0.3 } } });
-      ring.loop = { type: 'rotate', duration: 12, amount: 1, autoreverse: false };
-      const star = newLayer('shape', p, { name: 'Stern', plane: 'background', w: W * 0.5, h: W * 0.5, y: H * 0.55, shape: { type: 'star', fill: '#00e5ff', stroke: '#fff', strokeWidth: 0, points: 6, blur: 0 }, states: { Unlock: { rotation: 180, scale: 0.6 } } });
-      star.loop = { type: 'pulse', duration: 1.6, amount: 10, autoreverse: true };
-      const txt = newLayer('text', p, { name: 'Text', plane: 'foreground', y: H * 0.82, text: { content: 'STAY WEIRD', font: 'system-ui', weight: 900, size: 54, color: '#fff7a8', align: 'center', lineHeight: 1.1, letterSpacing: 4, italic: true, shadow: 0.9, fontAsset: null }, states: { Unlock: { y: H * 0.9, opacity: 0 } } });
-      txt.loop = { type: 'blink', duration: 3, amount: 40, autoreverse: false };
-      p.layers.push(newLayer('color', p, { name: 'Schwarz', color: '#07010f' }), ring, star, txt);
+      const ring = newLayer('shape', p, { name: 'Ring', w: W * 0.8, h: W * 0.8, y: H * 0.55, shape: { type: 'ring', fill: '#ff2bd6', stroke: '#fff', strokeWidth: 10, points: 5, blur: 3 }, blend: 'screenBlendMode', states: { Unlock: { scale: 1.6, opacity: 0.3 } } });
+      ring.anims.push(newAnim('spin'));
+      const star = newLayer('shape', p, { name: 'Star', plane: 'background', w: W * 0.5, h: W * 0.5, y: H * 0.55, shape: { type: 'star', fill: '#00e5ff', stroke: '#fff', strokeWidth: 0, points: 6, blur: 0 }, states: { Unlock: { rotation: 180, scale: 0.6 } } });
+      star.anims.push(newAnim('heartbeat'));
+      const txt = newLayer('text', p, { name: 'Text', y: H * 0.82, text: { content: 'STAY WEIRD', font: 'system-ui', weight: 900, size: 54, color: '#fff7a8', align: 'center', lineHeight: 1.1, letterSpacing: 4, italic: true, shadow: 0.9, fontAsset: null }, states: { Unlock: { y: H * 0.9, opacity: 0 } } });
+      txt.anims.push(newAnim('blink'));
+      p.layers.push(newLayer('color', p, { name: 'Black', color: '#07010f' }), ring, star, txt);
     },
   },
   {
-    id: 'reveal',
-    name: 'Foto-Reveal',
-    desc: 'Verschwommenes Sperrbild → klares Bild beim Entsperren. Ersetze die Ebenen durch eigene Fotos.',
+    id: 'daynight',
+    icon: '🌗',
+    name: 'Day & Night (Classic)',
+    desc: 'Follows iOS light/dark appearance – Classic format.',
     build(p) {
-      p.name = 'Foto-Reveal';
-      const H = p._h;
+      p.name = 'Day & Night';
+      p.format = 'classic';
+      p.appearanceAware = true;
+      const W = p._w, H = p._h;
       p.layers.push(
-        newLayer('gradient', p, { name: 'Platzhalter Sperrbild (ersetzen)', gradient: { type: 'radial', angle: 0, stops: [{ c: '#3a506b', p: 0 }, { c: '#0b132b', p: 1 }] } }),
-        newLayer('gradient', p, { name: 'Platzhalter Entsperrt (ersetzen)', plane: 'floating', gradient: grad(135, ['#f72585', 0], ['#7209b7', 0.5], ['#4cc9f0', 1]), opacity: 0, scale: 1.08, states: { Unlock: { opacity: 1, scale: 1 } } }),
-        newLayer('text', p, { name: 'Hinweis', plane: 'foreground', y: H * 0.75, text: { content: 'Tippe eine Ebene an → „Bild ersetzen“', font: 'system-ui', weight: 600, size: 22, color: '#ffffff', align: 'center', lineHeight: 1.2, letterSpacing: 0, italic: false, shadow: 0.5, fontAsset: null }, states: { Unlock: { opacity: 0 } } })
+        newLayer('gradient', p, { name: 'Sky', gradient: grad(170, ['#9ad7ff', 0], ['#e8f6ff', 1]) }),
+        newLayer('gradient', p, { name: 'Night sky', gradient: grad(170, ['#05081c', 0], ['#1a2350', 1]), opacity: 0, states: { 'Locked@dark': { opacity: 1 } } }),
+        newLayer('shape', p, { name: 'Sun / Moon', plane: 'background', w: 150, h: 150, x: W * 0.72, y: H * 0.33, shape: { type: 'ellipse', fill: '#ffd34d', stroke: '#fff', strokeWidth: 0, points: 5, blur: 2 }, states: { Unlock: { scale: 1.25, y: H * 0.3 }, 'Locked@dark': { opacity: 0.85 } } }),
+        newLayer('shape', p, { name: 'City', plane: 'floating', w: W * 1.2, h: H * 0.3, x: W / 2, y: H * 0.93, shape: { type: 'rect', fill: '#26324a', stroke: '#000', strokeWidth: 0, points: 5, blur: 0 } })
       );
     },
   },
   {
     id: 'blank',
-    name: 'Leer',
-    desc: 'Leere Leinwand.',
+    icon: '＋',
+    name: 'Blank',
+    desc: 'Empty canvas.',
     build(p) {
-      p.name = 'Neues Wallpaper';
+      p.name = 'New wallpaper';
     },
   },
 ];

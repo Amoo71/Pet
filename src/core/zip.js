@@ -124,7 +124,7 @@ export function createZip(entries) {
 
 async function inflateRaw(bytes) {
   if (typeof DecompressionStream === 'undefined') {
-    throw new Error('Dieses Archiv ist komprimiert und der Browser unterstützt kein DecompressionStream.');
+    throw new Error('This archive is compressed and the browser lacks DecompressionStream.');
   }
   const ds = new DecompressionStream('deflate-raw');
   const stream = new Blob([bytes]).stream().pipeThrough(ds);
@@ -146,13 +146,13 @@ export async function readZip(input) {
       break;
     }
   }
-  if (eocd < 0) throw new Error('Keine gültige ZIP/.tendies-Datei.');
+  if (eocd < 0) throw new Error('Not a valid ZIP/.tendies file.');
   const count = view.getUint16(eocd + 10, true);
   let p = view.getUint32(eocd + 16, true);
   const dec = new TextDecoder();
   const files = new Map();
   for (let i = 0; i < count; i++) {
-    if (view.getUint32(p, true) !== 0x02014b50) throw new Error('ZIP: beschädigtes Inhaltsverzeichnis.');
+    if (view.getUint32(p, true) !== 0x02014b50) throw new Error('ZIP: corrupt central directory.');
     const method = view.getUint16(p + 10, true);
     const csize = view.getUint32(p + 20, true);
     const nlen = view.getUint16(p + 28, true);
@@ -168,7 +168,7 @@ export async function readZip(input) {
     const raw = buf.subarray(start, start + csize);
     if (method === 0) files.set(name, raw.slice());
     else if (method === 8) files.set(name, await inflateRaw(raw));
-    else throw new Error(`ZIP: Kompressionsmethode ${method} wird nicht unterstützt.`);
+    else throw new Error(`ZIP: compression method ${method} is not supported.`);
   }
   return files;
 }
