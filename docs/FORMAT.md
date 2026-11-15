@@ -197,3 +197,12 @@ vignette) into the `FLOATING` group of the existing `main.caml` (`src/core/rawmo
   translation groups so it slides with the gyro.
 * **System-drawn (MercuryPoster):** `userInfo` holds `lookIdentifier` (colorA…colorD seen) and
   `appearanceMode` (`Automatic`); `configurableOptions` holds `motionEffectsDisabled`. Those are the only knobs.
+
+## What gyro can drive on device (from real wallpapers)
+
+Scan of 428 public .tendies (Nugget-Wallpapers, CAPlayground): `wallpaperParallaxGroups` keyPaths in use are
+`position.x/y`, `transform.translation.x/y`, `transform.rotation.x/y/z`, `bounds.size.width/height`,
+`transform.scale.y` (Apple), `zPosition`. **No wallpaper drives `opacity` with the gyro**, and **none uses
+perspective** (`sublayerTransform`); 3D wallpapers (Rubik's Cube, Apple's Marble) are orthographic.
+The Duo 3D tilt therefore uses only rotation (CATransformLayer) and `zPosition` (drawing order) and writes
+every resting value statically.

@@ -150,13 +150,13 @@ function mountStateBar() {
   // live 3D tilt strength for gyro-tilted layers (Duo tilt …)
   const tilted = () => (store.project?.layers || []).filter((l) => l.gyro?.tilt > 0 && !l.gyro?.fold);
   const tiltVal = el('output', { class: 'tilt-val' });
-  const tilt = el('input', { type: 'range', min: 0, max: 45, step: 1, class: 'scrub', 'aria-label': '3D tilt strength', title: '3D tilt strength' });
+  const tilt = el('input', { type: 'range', min: 0, max: 60, step: 1, class: 'scrub', 'aria-label': '3D tilt strength', title: '3D tilt strength' });
   tilt.addEventListener('input', () => {
     const v = Math.max(1, Number(tilt.value));
     update((p) => {
       for (const l of p.layers) if (l.gyro?.tilt > 0 && !l.gyro.fold) {
+        l.gyro.tiltV = l.gyro.tiltV ? Math.round(v * (l.gyro.tiltV / l.gyro.tilt)) : 0;
         l.gyro.tilt = v;
-        l.gyro.tiltV = Math.round(v * 0.35);
       }
     }, 'tiltStrength');
   });
