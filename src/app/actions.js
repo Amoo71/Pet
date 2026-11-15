@@ -476,11 +476,10 @@ function effectsForm(state) {
   state.ids ||= new Set(state.applied?.length ? state.applied : ['duotilt']);
   state.duo ||= { ...DUO_DEFAULTS };
   const duoOpts = el('div', { class: 'form duo-opts' }, [
-    numField('3D strength', () => state.duo.strength, (v) => (state.duo.strength = v), { min: 0, max: 80, step: 1, slider: true }),
-    numField('Tilt range', () => state.duo.tilt, (v) => (state.duo.tilt = v), { min: 2, max: 20, step: 1, slider: true, unit: '°' }),
+    numField('3D tilt', () => state.duo.tilt, (v) => (state.duo.tilt = v), { min: 4, max: 45, step: 1, slider: true, unit: '°' }),
     numField('Fold angle', () => state.duo.angle, (v) => (state.duo.angle = v), { min: 15, max: 90, step: 1, slider: true, unit: '°' }),
-    numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 60, step: 1, slider: true, unit: 'pt' }),
-    numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 0.9, step: 0.02, slider: true }),
+    numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 120, step: 1, slider: true, unit: 'pt' }),
+    numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 1, step: 0.02, slider: true }),
     toggleField('Folded on Lock, opens on unlock', () => state.duo.unlock, (v) => (state.duo.unlock = v)),
   ]);
   const grid = el('div', { class: 'fx-grid' }, EFFECTS.map((fx) => {

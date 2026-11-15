@@ -141,7 +141,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   // effects: Duo fold on the 3D photo project
   await pg.click('[data-add="effects"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => { const L = window.__studio.store.project.layers.filter((x) => x.fx === 'duotilt'); return L.length === 5 && L.filter((x) => x.gyro.tilt > 0 && x.sx > 1 && Math.abs(x.rotY) > 30).length === 4 && window.__studio.store.project.perspective === 0; }, null, { timeout: 60000 });
+  await pg.waitForFunction(() => { const L = window.__studio.store.project.layers.filter((x) => x.fx === 'duotilt'); return L.length === 4 && L.filter((x) => x.gyro?.tilt >= 20).length === 3 && L.filter((x) => x.gyro?.fade !== 'none' && x.gyro?.fade).length === 2 && window.__studio.store.project.perspective > 0; }, null, { timeout: 60000 });
   // turn it off again → the original layers come back
   await pg.click('[data-add="effects"]');
   await pg.click('.fx[data-fx="duotilt"]');

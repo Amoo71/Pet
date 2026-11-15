@@ -15,7 +15,7 @@ import { makeCanvas, canvasToBlob } from '../browser/raster.js';
 const PARTICLES = ['snow', 'rain', 'sparkle', 'stars', 'bubbles', 'embers', 'petals', 'confetti'];
 
 export const EFFECTS = [
-  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'Real 3D tilt built like Apple’s own 3D wallpapers: the picture swings on the centre line with the gyro, the side that turns away blurs and darkens.' },
+  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'iPhone Duo look: the picture tilts back in 3D with the gyro, the far side blurs and darkens.' },
   { id: 'duo', icon: '📖', name: 'Duo fold', desc: 'iPhone Duo fold: the left half folds on its hinge as you tilt (blur + shade follow).' },
   { id: 'depth', icon: '🧊', name: 'Depth parallax', desc: 'Gives every layer gyro parallax – back layers move less, front layers more.' },
   { id: 'unlockZoom', icon: '🔍', name: 'Unlock zoom', desc: 'Background pushes in while you swipe up.' },
@@ -25,7 +25,8 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 30, shade: 0.52, unlock: true, tilt: 12, strength: 44 };
+export const DUO_DEFAULTS = { angle: 60, blur: 55, shade: 0.4, unlock: true, tilt: 24, strength: 44 };
+DUO_DEFAULTS.shade = 0.6;
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -151,113 +152,105 @@ export async function duoLayers(project, picture, o = DUO_DEFAULTS) {
  * opaque at the outer edge and fading inward. It sits just outside the screen
  * and slides in with gyro translation (the only gyro key path verified on device).
  */
-/** half of the picture whose outer edge is progressively blurred and shaded */
-function edgeBlurHalf(half, radius, outer, shade) {
-  const W = half.width;
-  const H = half.height;
-  // progressiveBlur blurs towards the left edge – mirror for a right half
-  const flip = (c) => {
-    const o = makeCanvas(c.width, c.height);
-    const x = o.getContext('2d');
-    x.translate(c.width, 0);
-    x.scale(-1, 1);
-    x.drawImage(c, 0, 0);
-    x.setTransform(1, 0, 0, 1, 0, 0);
-    return o;
+/**
+ * The far-edge look of the iPhone Duo fold, as recreated 1:1 by Mac-Duo
+ * (github.com/sumimakito/Mac-Duo, Apache-2.0 – DepthShaders / BlurGradient / DepthTuning):
+ *   h      = 0 at the near edge … 1 at the far edge
+ *   blur   = maxBlur · (floor + (1 − floor) · h)                 floor 0.15, maxBlur 55 pt
+ *   fade   = dimFloor + (1 − dimFloor) · smoothstep(0, reach, h)  dimFloor 0.2, reach 0.9
+ *   colour = colour · (1 − maxDim · fade)^2.2                      maxDim 0.6 (Mac-Duo 0.4 … 1.0)
+ * Rendered as a bitmap whose far side is `far` ('left' | 'right').
+ */
+function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
+  const W = src.width;
+  const H = src.height;
+  const floor = o.floor ?? 0.15; // Mac-Duo blurEvenness (DepthTuning 0.4, factory 0)
+  const dimFloor = o.dimFloor ?? 0.2;
+  const reach = o.reach ?? 0.9; // Mac-Duo dimReach (DepthTuning 0.7, factory 0.5)
+  const hAt = (x) => (far === 'left' ? 1 - x / W : x / W);
+  const out = makeCanvas(W, H);
+  const g = out.getContext('2d');
+  // blur pyramid: N levels, each faded in where its radius is reached
+  const N = 6;
+  const level = (r) => {
+    const c = makeCanvas(W, H);
+    const x = c.getContext('2d');
+    const pad = r * 2;
+    x.filter = r > 0.5 ? `blur(${r}px)` : 'none';
+    x.drawImage(src, -pad, -pad, W + pad * 2, H + pad * 2);
+    return c;
   };
-  const out = outer === 'left' ? progressiveBlur(half, radius) : flip(progressiveBlur(flip(half), radius));
-  // shade: none at the centre line → `shade` at the outer edge
-  const x = out.getContext('2d');
-  const g = outer === 'left' ? x.createLinearGradient(W, 0, 0, 0) : x.createLinearGradient(0, 0, W, 0);
-  // darken like the Duo inner screen: starts at 20 %, min(1, 2·((e−0.2)/0.8)^1.35), scaled by `shade`
-  const k = Math.min(1.6, shade / 0.52);
-  for (let i = 0; i <= 10; i++) {
-    const e = i / 10;
-    const d = Math.max(0, (e - 0.2) / 0.8);
-    g.addColorStop(e, `rgba(0,0,0,${Math.min(0.92, Math.min(1, 2 * Math.pow(d, 1.35)) * 0.8 * k).toFixed(3)})`);
+  g.drawImage(level(maxBlur * floor), 0, 0);
+  for (let i = 1; i < N; i++) {
+    const t = i / (N - 1); // blur fraction above the floor this level represents
+    const L = level(maxBlur * (floor + (1 - floor) * t));
+    // visible where h ≥ t (soft ramp of one step)
+    const m = makeCanvas(W, H);
+    const mx = m.getContext('2d');
+    const grad = mx.createLinearGradient(0, 0, W, 0);
+    for (let k = 0; k <= 20; k++) {
+      const x = k / 20;
+      const h = hAt(x * W);
+      const a = Math.max(0, Math.min(1, (h - (t - 1 / (N - 1))) * (N - 1)));
+      grad.addColorStop(x, `rgba(0,0,0,${a.toFixed(3)})`);
+    }
+    mx.fillStyle = grad;
+    mx.fillRect(0, 0, W, H);
+    mx.globalCompositeOperation = 'source-in';
+    mx.drawImage(L, 0, 0);
+    g.drawImage(m, 0, 0);
   }
-  x.fillStyle = g;
-  x.fillRect(0, 0, W, H);
+  // dimming
+  const smooth = (e0, e1, x) => {
+    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  const dg = g.createLinearGradient(0, 0, W, 0);
+  for (let k = 0; k <= 24; k++) {
+    const x = k / 24;
+    const fade = dimFloor + (1 - dimFloor) * smooth(0, Math.max(reach, 0.02), hAt(x * W));
+    const keep = Math.pow(1 - maxDim * fade, 2.2);
+    dg.addColorStop(x, `rgba(0,0,0,${(1 - keep).toFixed(3)})`);
+  }
+  g.fillStyle = dg;
+  g.fillRect(0, 0, W, H);
   return out;
 }
 
 /**
- * Duo 3D tilt – built like Apple's own 3D wallpapers (reverse-engineered from the
- * iPhone 17 "Marble" .tendies, see docs/FORMAT.md):
- *   * the picture is split at the screen centre into a left and a right half;
- *   * each half hangs on the centre line (anchorPoint 0/1, 0.5) and is pre-rotated
- *     steeply about Y (±θ₀) with its width scaled by 1/cos θ₀, so at rest it looks flat;
- *   * a gyro CATransformLayer around it adds ±δ of rotation.y. Because the half is
- *     already steep, a few degrees change its projected width a lot:
- *     width = cos(θ₀ ∓ δ)/cos θ₀ – one half swings away, the other comes forward.
- *     This is visible even without perspective (Apple's rig is orthographic too);
- *   * a blurred + shaded copy of each half fades in as that half swings away,
- *     and a blurred, darker backdrop shows at the screen edge – the Duo edge blur.
+ * Duo 3D tilt – the iPhone Duo fold look, driven by the gyro.
+ * Model (Mac-Duo's DepthGeometry): the picture is a plate that turns back in real
+ * perspective, the far edge recedes into black, and blur + dimming grow towards it.
+ *   * one picture layer, pivot at the centre, gyro rotation.y ±tilt (rotation.x a third)
+ *     on a CATransformLayer around it; the scene perspective gives the trapezoid;
+ *   * two "far edge" copies (blur + dim per the formulas above) fade in with the tilt,
+ *     one for each direction, so the side turning away blurs and darkens;
+ *   * black behind, like the Duo's panel edge.
  */
 export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const W = project._w;
   const H = project._h;
   const scale = 2;
-  const theta = Math.max(20, Math.min(76, 32 + (o.strength ?? 44) * 0.55)); // pre-rotation °
-  const delta = Math.max(2, Math.min(20, o.tilt ?? 12)); // gyro swing °
-  const sx = 1 / Math.cos((theta * Math.PI) / 180);
-  const k = 1.08; // a little bleed above / below and at the outer edges
+  const tilt = Math.max(4, Math.min(45, o.tilt ?? 24));
+  const maxBlur = Math.max(0, o.blur ?? 55) * scale;
+  const maxDim = Math.max(0, Math.min(1, o.shade ?? 0.6));
+  const k = 1.04; // a little bleed so the near edge never shows a gap
   const src = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), scale);
   const PW = Math.round(W * k * scale);
   const PH = Math.round(H * k * scale);
   const pic = makeCanvas(PW, PH);
   pic.getContext('2d').drawImage(src, 0, 0, PW, PH);
-  const blurR = Math.max(6, (o.blur ?? 22) * scale);
-  const shade = o.shade ?? 0.52;
-  // backdrop: blurred, darker copy – what you see at the edge when a half swings away
-  const back = makeCanvas(W * scale, H * scale);
-  {
-    const x = back.getContext('2d');
-    x.filter = `blur(${blurR * 1.6}px)`;
-    const pad = blurR * 3;
-    x.drawImage(src, -pad, -pad, back.width + pad * 2, back.height + pad * 2);
-    x.filter = 'none';
-    x.fillStyle = `rgba(0,0,0,${Math.min(0.8, shade * 0.9)})`;
-    x.fillRect(0, 0, back.width, back.height);
-  }
-  const layers = [];
-  layers.push(newLayer('image', project, { name: 'Duo tilt backdrop', asset: await canvasAsset(back, 'image/jpeg', 0.85), w: Math.round(W * 1.1), h: Math.round(H * 1.1), fit: 'stretch', plane: 'background', parallax: 10 }));
-  const ov = 2; // pt of overlap across the centre line – hides the seam
-  for (const side of ['left', 'right']) {
-    const hw = Math.round((W * k) / 2);
-    const w = hw + ov;
-    const half = makeCanvas(w * scale, PH);
-    half.getContext('2d').drawImage(pic, side === 'left' ? 0 : -(PW / 2 - ov * scale), 0);
-    const geo = {
-      // x/y = layer centre; the anchor sits exactly on the centre line
-      x: side === 'left' ? W / 2 + ov - w / 2 : W / 2 - ov + w / 2,
-      y: H / 2,
-      w,
-      h: Math.round(H * k),
-      fit: 'stretch',
-      plane: 'background',
-      anchor: { x: side === 'left' ? hw / w : ov / w, y: 0.5 },
-      rotY: side === 'left' ? theta : -theta,
-      sx,
-    };
-    const L = side === 'left' ? 'L' : 'R';
-    layers.push(newLayer('image', project, { ...geo, name: `Duo tilt ${L}`, asset: await canvasAsset(half, 'image/jpeg', 0.9), gyro: { tilt: delta, tiltV: delta * 0.25, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 } }));
-    // tilting right (+x) turns the left half away, tilting left the right half
-    layers.push(
-      newLayer('image', project, {
-        ...geo,
-        name: `Duo tilt ${L} blur`,
-        asset: await canvasAsset(edgeBlurHalf(half, blurR, side, shade)),
-        gyro: { tilt: delta, tiltV: delta * 0.25, fold: 0, fade: side === 'left' ? 'x' : '-x', fadeMin: -1, fadeMax: 1 },
-      })
-    );
-  }
-  if (o.unlock) {
-    layers[0].states = { Unlock: { scale: 1.06 }, Sleep: { opacity: 0.6 } };
-    for (const l of layers.slice(1)) l.states = { Sleep: { opacity: 0.6 } };
-  }
-  // the rig is orthographic like Apple's: a scene perspective would distort the steep halves
-  return { layers, hideOthers: true, orthographic: true };
+  const geo = { x: W / 2, y: H / 2, w: Math.round(W * k), h: Math.round(H * k), fit: 'stretch', plane: 'background' };
+  const gyro = (fade) => ({ tilt, tiltV: Math.round(tilt * 0.35), fold: 0, fade, fadeMin: -1, fadeMax: 1 });
+  const layers = [
+    newLayer('color', project, { name: 'Duo backdrop', color: '#000000', plane: 'background' }),
+    newLayer('image', project, { ...geo, name: 'Duo picture', asset: await canvasAsset(pic, 'image/jpeg', 0.92), gyro: gyro('none') }),
+    // tilting right (+x) turns the right edge away; tilting left the left edge
+    newLayer('image', project, { ...geo, name: 'Duo far right', asset: await canvasAsset(duoFarCopy(pic, 'right', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('x') }),
+    newLayer('image', project, { ...geo, name: 'Duo far left', asset: await canvasAsset(duoFarCopy(pic, 'left', maxBlur, maxDim), 'image/jpeg', 0.9), gyro: gyro('-x') }),
+  ];
+  if (o.unlock) for (const l of layers.slice(1)) l.states = { Unlock: { scale: 1.04 }, Sleep: { opacity: 0.6 } };
+  return { layers, hideOthers: true };
 }
 
 /**
@@ -333,7 +326,7 @@ export async function prepareEffects(project, ids, opts = {}) {
         l.hidden = true;
       }
       p.layers.unshift(...added.duotilt);
-      // orthographic like Apple's rig (perspective 0 = none); restored on removal
+      // real perspective like the Duo (restored on removal)
       p.fxApplied.duotilt.__project = { perspective: p.perspective };
       done.push('+ Duo 3D tilt');
     }
@@ -344,7 +337,7 @@ export async function prepareEffects(project, ids, opts = {}) {
     }
     if (added.duo || added.duotilt) {
       if (p.format === 'classic') p.format = 'modern';
-      p.perspective = added.duotilt || (have.has('duotilt') && want.has('duotilt')) ? 0 : Math.min(p.perspective || 900, 700);
+      p.perspective = Math.min(p.perspective || 800, 800);
     }
     if (want.has('vignette') && !have.has('vignette')) {
       p.layers.push(Object.assign(newLayer('gradient', p, { name: 'Vignette', plane: 'floating', gradient: { type: 'radial', angle: 0, stops: [{ c: '#00000000', p: 0.55 }, { c: '#000000b3', p: 1 }] } }), { fx: 'vignette' }));

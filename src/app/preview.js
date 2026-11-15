@@ -678,7 +678,8 @@ function setTilt(x, y) {
 
 function onTiltMouse(e) {
   if (store.view.mode !== 'preview' || motionOn) return;
-  const r = stage.getBoundingClientRect();
+  // relative to the phone: its edges = full tilt (like holding the phone at the gyro range)
+  const r = (stage.querySelector('.phone') || stage).getBoundingClientRect();
   setTilt(((e.clientX - r.left) / r.width) * 2 - 1, ((e.clientY - r.top) / r.height) * 2 - 1);
 }
 

@@ -34,3 +34,10 @@ SOFTWARE.
 `src/browser/duo-fold.js` (the `<duo-fold>` WebGL2 component used for the 3D iPhone Duo preview)
 is inspired by https://github.com/254558/iphone-duo-fold-preview (MIT, jadon7): hinge fold with a
 Hermite crease, fixed front-view projection, image-space blur and darkening.
+
+## Mac-Duo (sumimakito) – Apache-2.0
+
+The Duo 3D tilt effect (`src/app/effects.js`, `duoFarCopy` / `duoTiltLayers`) follows the iPhone Duo
+fold model recreated in https://github.com/sumimakito/Mac-Duo (Copyright 2026 Makito, Apache License 2.0):
+the picture turns back in perspective, blur = maxBlur·(floor + (1−floor)·h), dimming
+(1 − maxDim·fade)^2.2 with fade = 0.2 + 0.8·smoothstep(0, reach, h). Formulas re-implemented, no code copied.
