@@ -64,6 +64,7 @@ for (const format of ['modern', 'classic']) {
     assert.equal(wp.assets.lockAndHome.default.type, 'ParameterizedCA');
     assert(wp.assets.lockAndHome.default.assetFileName.endsWith('.Clownfish_Gyro.ca'));
     assert.equal(wp.wantsDeviceMotion, true);
+    assert(wp.productTypes.includes('iPhone17,1') && wp.productTypes.includes('iPhone15,2'), 'all iPhones listed');
     assert(names.some((n) => n.endsWith('/.com.apple.posterkit.provider.contents.configurableOptions.plist')), 'hidden options plist kept');
     assert(names.some((n) => n.endsWith('renderingConfiguration.plist')));
     const meta = parsePlist(files.get(names.find((n) => n.endsWith('suggestionMetadata.plist'))));
@@ -73,6 +74,10 @@ for (const format of ['modern', 'classic']) {
     const names2 = [...(await readZip(zip2)).keys()];
     assert.equal(names2.find((n) => n.endsWith('main.caml')), camlPath, 'stable identity');
   } else {
+    assert(names.some((n) => /versions\/1\/contents\/7400\.WWDC_2022-390w-844h@3x~iphone\.wallpaper\/7400\.WWDC_2022_Background-390w-844h@3x~iphone\.ca\/main\.caml$/.test(n)), 'classic uses Apple bundle naming');
+    const cwp = parsePlist(files.get(names.find((n) => n.endsWith('Wallpaper.plist'))));
+    assert.equal(cwp.family, 'WWDC22');
+    assert(names.some((n) => n.endsWith('versions/1/com.apple.posterkit.provider.instance.complicationLayout.plist')), 'full metadata');
     const fl = text(files.get(names.find((n) => n.includes('_Floating') && n.endsWith('main.caml'))));
     assert(fl.includes('<LKState name="Unlock Dark">'));
     assert(fl.includes(`keyPath="position.y"><value type="integer" value="${874 - 300}"/>`), 'classic y flipped');

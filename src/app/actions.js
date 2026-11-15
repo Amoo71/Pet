@@ -430,9 +430,10 @@ export function openExport() {
   const body = el('div', { class: 'export' }, [
     el('div', { class: 'format-cards' }, [
       formatCard('modern', 'Modern', 'iOS 26 / 27', ['Follows your finger when swiping', 'Gyro parallax', 'iOS 27 depth fix (Clownfish)', 'Liquid Glass'], opts),
-      formatCard('duo', 'Duo', 'iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Apple’s split-screen schema'], opts),
+      formatCard('duo', 'Duo', 'only iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Won’t appear on regular iPhones'], opts),
       formatCard('classic', 'Classic', 'iOS 17 – 26', ['Spring animation after unlock', 'Light / Dark variants', 'Most compatible with older tools'], opts),
     ]),
+    el('p', { class: 'muted' }, 'Placard tip: Classic uses exactly the structure of community wallpapers verified on iOS 27.2 – if a Modern wallpaper doesn’t show up in Collections, export Classic. After installing, respring (Placard → refresh) and look under + → Collections.'),
     selectField('Quality', [[3, 'Best (@3x)'], [2, 'Performance (@2x, smaller)']], () => opts.scale, (v) => ((opts.scale = Number(v)), refreshMem())),
     mem,
     issues.length ? el('ul', { class: 'issues' }, issues.map((i) => el('li', { class: `issue-${i.level}` }, i.msg))) : el('p', { class: 'ok-note' }, '✓ Ready to export'),
