@@ -51,7 +51,7 @@ export function uniqueNames(layers) {
   const used = new Set(['Root Layer', 'BACKGROUND', 'FLOATING']);
   const map = new Map();
   for (const l of layers) {
-    let base = String(l.name || l.kind).replace(/[^\w \-.()#&+,!']+/g, '').trim() || l.kind;
+    let base = String(l.name || l.kind).replace(/[^\w \-.]+/g, ' ').replace(/\s+/g, ' ').trim() || l.kind;
     let n = base;
     let i = 2;
     const SUFFIXES = ['', ' Parallax', ' Parallax 2', ' Fade', ' Tilt', ' GyroFade', ' Content', ' Rim'];
