@@ -141,7 +141,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   // effects: Duo fold on the 3D photo project
   await pg.click('[data-add="effects"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => { const L = window.__studio.store.project.layers.filter((x) => x.fx === 'duotilt'); return L.length === 5 && L.filter((x) => x.gyro.tilt > 0 && x.sx > 1 && Math.abs(x.rotY) > 30).length === 4 && window.__studio.store.project.perspective === 0; }, null, { timeout: 60000 });
+  await pg.waitForFunction(() => { const L = window.__studio.store.project.layers.filter((x) => x.fx === 'duotilt'); return L.length === 5 && L.filter((x) => x.gyro?.tilt >= 20).length === 4 && L.filter((x) => x.anchor?.x === 0).length === 2 && L.filter((x) => x.anchor?.x === 1).length === 2 && window.__studio.store.project.perspective > 0; }, null, { timeout: 60000 });
   // turn it off again → the original layers come back
   await pg.click('[data-add="effects"]');
   await pg.click('.fx[data-fx="duotilt"]');
@@ -169,15 +169,52 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
     const a = await import('/src/app/actions.js');
     a.rawMorphFlow([{ name: 'Marble', bytes }]);
   });
-  await pg.waitForSelector('.modal .fx[data-fx="fx-snow"].on');
+  await pg.waitForSelector('.modal .fx[data-fx="fx-snow"]');
+  await pg.click('.modal .fx[data-fx="fx-snow"]');
+  await pg.locator('.modal .field:has-text("Light intensity") input.num').fill('0.6');
+  await pg.locator('.modal .field:has-text("Saturation") input.num').fill('1.4');
   assert.equal(await pg.locator('.modal .fx[data-fx="duotilt"]').count(), 0, 'raw morph offers overlay effects only');
+  // edit the original: hide one of its layers
+  await pg.click('.orig summary:has-text("Layers")');
+  await pg.locator('.orig .orig-row:has-text("_GYRO") .switch').click();
   const rdl = pg.waitForEvent('download');
   await pg.click('.modal-actions button:has-text("Morph & export")');
   const rfile = path.join(OUT, 'raw-morph.tendies');
   await (await rdl).saveAs(rfile);
   const rbuf = fs.readFileSync(rfile);
   assert(rbuf.includes(Buffer.from('morph-snow')) && rbuf.includes(Buffer.from('a.HEIC')), 'raw morph output keeps HEIC and adds snow');
+  assert(rbuf.includes(Buffer.from('morph-light')) && rbuf.includes(Buffer.from('Morph Saturate')), 'light + grading');
+  assert(/<CATransformLayer hidden="1" name="_GYRO"|name="_GYRO"[^>]*hidden="1"/.test(rbuf.toString('latin1')), 'original layer hidden');
+  // system-drawn Apple wallpaper: look switch
+  await pg.evaluate(async () => {
+    const { createZip } = await import('/src/core/zip.js');
+    const { toBinaryPlist } = await import('/src/core/bplist.js');
+    const d = 'Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/X/';
+    const bytes = createZip([
+      { path: d + 'com.apple.posterkit.provider.descriptor.identifier', data: new TextEncoder().encode('X') },
+      { path: d + 'versions/0/contents/com.apple.posterkit.provider.contents.userInfo', data: toBinaryPlist({ appearanceMode: 'Automatic', lookIdentifier: 'colorA' }) },
+    ]);
+    (await import('/src/app/actions.js')).rawMorphFlow([{ name: 'Mercury', bytes }]);
+  });
+  await pg.click('.modal .seg-btn[data-v="colorC"]');
+  const sdl = pg.waitForEvent('download');
+  await pg.click('.modal-actions button:has-text("Export")');
+  const sfile = path.join(OUT, 'system.tendies');
+  await (await sdl).saveAs(sfile);
+  assert(fs.readFileSync(sfile).includes(Buffer.from('colorC')), 'look switched');
 
+  // new shell: rail toggles the inspector, Duo 3D preview opens
+  await pg.keyboard.press('Escape');
+  await pg.evaluate(() => document.querySelectorAll('.modal-back').forEach((m) => m.remove()));
+  await pg.click('.rail-btn.tab[data-tab="style"]');
+  const undoLen = await pg.evaluate(() => window.__studio.store.undo.length);
+  await pg.click('.rail-btn.tab[data-tab="style"]');
+  assert.equal(await pg.evaluate(() => document.getElementById('app').dataset.panel), 'closed', 'tapping the active tab closes the panel');
+  assert.equal(await pg.evaluate(() => window.__studio.store.undo.length), undoLen, 'panel toggling is not an undo step');
+  await pg.click('.rail-btn.tab[data-tab="layers"]');
+  assert.equal(await pg.evaluate(() => document.getElementById('app').dataset.panel), 'open');
+  await pg.click('#duoBtn');
+  await pg.waitForSelector('duo-fold');
   assert.deepEqual(errors, []);
   console.log('E2E OK →', OUT);
   await browser.close();

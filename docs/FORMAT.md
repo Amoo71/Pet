@@ -187,3 +187,13 @@ holds only metadata plists (providerInfo, descriptor.identifier, suggestionMetad
 For Apple's own ParameterizedCA wallpapers (HEIC, nested 3D rigs) Morph does not rebuild the
 wallpaper: it keeps every file byte-for-byte and only inserts overlay layers (particles,
 vignette) into the `FLOATING` group of the existing `main.caml` (`src/core/rawmorph.js`).
+
+## Re-programming Apple wallpapers
+
+* **Coded (ParameterizedCA, e.g. iPhone 17 Marble):** colour grading (`colorBrightness`, `colorContrast`,
+  `colorSaturate`, `colorHueRotate`) is added to the CALayers directly inside `BACKGROUND` – where Apple
+  keeps its own filters (`_SCALE_X`, `_Fix_Seam`). The gyro ranges of `wallpaperParallaxGroups` can be
+  scaled (stronger / weaker 3D). A light (radial PNG, blend mode, opacity) goes into `FLOATING`, with
+  translation groups so it slides with the gyro.
+* **System-drawn (MercuryPoster):** `userInfo` holds `lookIdentifier` (colorA…colorD seen) and
+  `appearanceMode` (`Automatic`); `configurableOptions` holds `motionEffectsDisabled`. Those are the only knobs.

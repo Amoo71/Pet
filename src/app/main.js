@@ -8,69 +8,176 @@ import { listProjects, deleteProject, saveProject, collectGarbage, requestPersis
 import { projectThumbnail } from './assets.js';
 import { TEMPLATES } from './templates.js';
 import * as A from './actions.js';
+import { icon } from './icons.js';
 
 const $ = (s) => document.querySelector(s);
 
-function mountTopbar() {
-  const bar = $('#topbar');
-  const name = el('input', { class: 'proj-name', 'aria-label': 'Project name', spellcheck: 'false' });
-  name.addEventListener('input', () => update((p) => (p.name = name.value), 'pname'));
-  const undoB = el('button', { class: 'icon-btn', title: 'Undo (⌘Z)', 'aria-label': 'Undo', onclick: undo }, '↶');
-  const redoB = el('button', { class: 'icon-btn', title: 'Redo (⇧⌘Z)', 'aria-label': 'Redo', onclick: redo }, '↷');
-  const mode = persistent(() =>
-    segmented([['edit', '✎ Edit'], ['preview', '▶ Preview']], () => store.view.mode, (v) => {
-      setView({ mode: v, progress: store.view.state === 'Unlock' ? 1 : 0 });
-      if (v === 'edit') resetTilt();
-    }, 'mode')
+const TABS = [
+  ['layers', 'layers', 'Layers'],
+  ['style', 'style', 'Style'],
+  ['motion', 'motion', 'Motion'],
+  ['project', 'gear', 'Project'],
+];
+
+/** left tool rail (Liquid Glass) */
+function mountRail() {
+  const rail = $('#rail');
+  const rb = (ic, label, fn, attrs = {}) => el('button', { type: 'button', class: `rail-btn ${attrs.class || ''}`, title: label, 'aria-label': label, onclick: fn, ...attrs, ...(attrs.class ? { class: `rail-btn ${attrs.class}` } : {}) }, [icon(ic), el('span', { class: 'rail-label' }, label)]);
+  const tabBtns = TABS.map(([id, ic, label]) =>
+    rb(ic, label, () => {
+      const open = $('#app').dataset.panel !== 'closed';
+      if (store.view.tab === id && open) setPanel('closed');
+      else {
+        setView({ tab: id });
+        setPanel('open');
+      }
+    }, { class: 'tab', 'data-tab': id, role: 'tab' })
   );
-  const addBtn = el('button', { class: 'btn add-main', id: 'addBtn', onclick: openAddMenu }, '＋ Add');
-  bar.append(
-    el('button', { class: 'icon-btn', title: 'Library', 'aria-label': 'Library', id: 'libBtn', onclick: openLibrary }, '☰'),
-    el('button', { class: 'icon-btn', title: 'Browse wallpapers', 'aria-label': 'Browse wallpapers', id: 'browseBtn', onclick: () => A.openBrowse() }, '🌐'),
-    el('div', { class: 'brand' }, [el('span', { class: 'logo' }), el('span', { class: 'brand-name' }, 'Tendies Studio')]),
-    name,
-    el('div', { class: 'spacer' }),
-    addBtn,
-    mode,
-    undoB,
-    redoB,
-    el('button', { class: 'btn primary', id: 'exportBtn', onclick: () => A.openExport() }, 'Export')
+  const undoB = rb('undo', 'Undo', undo, { class: 'mini' });
+  const redoB = rb('redo', 'Redo', redo, { class: 'mini' });
+  rail.append(
+    el('div', { class: 'rail-group' }, [
+      rb('library', 'Library', openLibrary, { id: 'libBtn' }),
+      rb('plus', 'Add', openAddMenu, { id: 'addBtn', class: 'accent' }),
+    ]),
+    el('div', { class: 'rail-group' }, tabBtns),
+    el('div', { class: 'rail-group' }, [
+      rb('sparkles', 'Effects', () => A.openEffects(), { id: 'fxBtn' }),
+      rb('globe', 'Browse', () => A.openBrowse(), { id: 'browseBtn' }),
+      rb('fold', 'Duo', () => A.openDuoPreview(), { id: 'duoBtn' }),
+    ]),
+    el('div', { class: 'rail-spacer' }),
+    el('div', { class: 'rail-group' }, [undoB, redoB, rb('share', 'Export', () => A.openExport(), { id: 'exportBtn', class: 'primary' })])
   );
   subscribe(() => {
-    if (document.activeElement !== name) name.value = store.project?.name || '';
+    const open = $('#app').dataset.panel !== 'closed';
+    tabBtns.forEach((b) => b.classList.toggle('on', open && b.dataset.tab === store.view.tab));
     undoB.disabled = !store.undo.length;
     redoB.disabled = !store.redo.length;
     document.title = `${store.project?.name || 'Project'} – Tendies Studio`;
   });
 }
 
+/** inspector: docked on the right (wide) or a bottom sheet with detents (narrow) */
+function setPanel(state) {
+  const app = $('#app');
+  app.dataset.panel = state;
+  try {
+    localStorage.setItem('tendies.panel', state);
+  } catch {
+    /* private mode */
+  }
+  setView({});
+}
+
+function mountSheet() {
+  const panel = $('#panel');
+  let saved = null;
+  try {
+    saved = localStorage.getItem('tendies.panel');
+  } catch {
+    /* ignore */
+  }
+  $('#app').dataset.panel = saved || 'open';
+  // drag the grabber (narrow layout): up = full, down = closed
+  let drag = null;
+  panel.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('.grabber, .panel-head')) return;
+    if (e.target.closest('button')) return;
+    drag = { y: e.clientY, h: panel.getBoundingClientRect().height, id: e.pointerId };
+    panel.setPointerCapture(e.pointerId);
+    panel.classList.add('dragging');
+  });
+  panel.addEventListener('pointermove', (e) => {
+    if (!drag || drag.id !== e.pointerId) return;
+    panel.style.height = `${Math.max(56, drag.h + drag.y - e.clientY)}px`;
+  });
+  const end = (e) => {
+    if (!drag) return;
+    const dy = drag.y - e.clientY;
+    const cur = $('#app').dataset.panel;
+    panel.style.height = '';
+    panel.classList.remove('dragging');
+    drag = null;
+    if (Math.abs(dy) < 6) return setPanel(cur === 'closed' ? 'open' : cur === 'open' ? 'full' : 'open');
+    if (dy > 60) setPanel(cur === 'closed' ? 'open' : 'full');
+    else if (dy < -60) setPanel(cur === 'full' ? 'open' : 'closed');
+  };
+  panel.addEventListener('pointerup', end);
+  panel.addEventListener('pointercancel', end);
+}
+
 function openAddMenu() {
-  const close = modal('Add layer', el('div', { class: 'add-grid big' }, ADD.map(([k, i, n, fn]) => el('button', { type: 'button', class: 'add-btn', 'data-add': k, onclick: () => (close(), fn()) }, [el('span', { class: 'add-ico' }, i), n]))));
+  const close = modal('Add', el('div', { class: 'add-grid big' }, ADD.map(([k, i, n, fn]) => el('button', { type: 'button', class: 'add-btn', 'data-add': k, onclick: () => (close(), fn()) }, [el('span', { class: 'add-ico' }, i), n]))), [], { sheet: true });
+}
+
+/** floating glass pills on the canvas: project name, Edit / Play */
+function mountTopPills() {
+  const bar = $('#topPills');
+  const name = el('input', { class: 'proj-name', 'aria-label': 'Project name', spellcheck: 'false' });
+  name.addEventListener('input', () => update((p) => (p.name = name.value), 'pname'));
+  const mode = persistent(() =>
+    segmented([['edit', [icon('edit'), el('span', {}, 'Edit')]], ['preview', [icon('play'), el('span', {}, 'Play')]]], () => store.view.mode, (v) => {
+      setView({ mode: v, progress: store.view.state === 'Unlock' ? 1 : 0 });
+      if (v === 'edit') resetTilt();
+      // on a phone, Play asks for the motion sensor right away (iOS needs this tap)
+      else if (matchMedia('(pointer: coarse)').matches && typeof DeviceOrientationEvent !== 'undefined')
+        enableDeviceMotion().then((ok) => toast(ok ? 'Tilt your phone' : 'Motion sensor not allowed – move over the preview instead', ok ? 'ok' : 'warn'));
+    }, 'mode glass-seg')
+  );
+  bar.append(el('div', { class: 'pill name-pill' }, name), mode);
+  subscribe(() => {
+    if (document.activeElement !== name) name.value = store.project?.name || '';
+  });
 }
 
 function mountStateBar() {
   const bar = $('#statebar');
-  const seg = persistent(() => segmented(STATES.map((s) => [s.id, `${s.icon} ${s.name}`]), () => store.view.state, (v) => setView({ state: v, progress: v === 'Unlock' ? 1 : 0 }), 'states'));
-  const scrub = el('input', { type: 'range', min: 0, max: 1, step: 0.01, class: 'scrub', 'aria-label': 'Swipe progress Lock → Home', title: 'Scrub the unlock swipe (Lock → Home)' });
+  const ICON = { Locked: 'lock', Unlock: 'home', Sleep: 'moon' };
+  const seg = persistent(() => segmented(STATES.map((s) => [s.id, [icon(ICON[s.id] || 'lock'), el('span', {}, s.name)], s.name]), () => store.view.state, (v) => setView({ state: v, progress: v === 'Unlock' ? 1 : 0 }), 'states glass-seg'));
+  const scrub = el('input', { type: 'range', min: 0, max: 1, step: 0.01, class: 'scrub', 'aria-label': 'Swipe progress Lock → Home', title: 'Unlock swipe' });
   scrub.addEventListener('input', () => {
     const v = Number(scrub.value);
     setView({ progress: v, state: v >= 1 ? 'Unlock' : 'Locked' });
   });
-  const scrubWrap = el('label', { class: 'scrub-wrap' }, [el('span', {}, '🔒'), scrub, el('span', {}, '📱')]);
-  const darkBtn = el('button', { class: 'icon-btn toggle-btn', title: 'Light / Dark', 'aria-label': 'Toggle light/dark', onclick: () => setView({ dark: !store.view.dark }) });
-  const demo = el('button', { class: 'btn small', title: 'Play the unlock swipe', onclick: playUnlockDemo }, '▶ Unlock');
-  const clock = el('button', { class: 'icon-btn toggle-btn', title: 'Show clock & UI', 'aria-label': 'Toggle clock', onclick: () => setView({ clock: !store.view.clock }) }, '🕘');
-  const motion = el('button', { class: 'btn small', title: 'Use the phone’s motion sensor for parallax', onclick: async () => toast((await enableDeviceMotion()) ? 'Motion on – tilt your phone' : 'Motion sensor not available', 'info') }, '🧭 Motion');
-  const posture = persistent(() => segmented([['cover', 'Cover'], ['inner', 'Inner'], ['land', 'Landscape']], () => store.view.posture || 'inner', (v) => setView({ posture: v }), 'posture'));
-  bar.append(seg, scrubWrap, posture, darkBtn, demo, motion, clock);
+  const scrubWrap = el('label', { class: 'pill scrub-wrap' }, [icon('lock'), scrub, icon('home')]);
+  const ib = (ic, label, fn) => el('button', { type: 'button', class: 'pill icon-pill', title: label, 'aria-label': label, onclick: fn }, icon(ic));
+  const darkBtn = ib('sun', 'Light / Dark', () => setView({ dark: !store.view.dark }));
+  const demo = ib('unlock', 'Play unlock', playUnlockDemo);
+  const clock = ib('clock', 'Clock & UI', () => setView({ clock: !store.view.clock }));
+  const motion = ib('gyro', 'Motion sensor', async () => toast((await enableDeviceMotion()) ? 'Tilt your phone' : 'Motion sensor not available', 'info'));
+  const posture = persistent(() => segmented([['cover', 'Cover'], ['inner', 'Inner'], ['land', 'Land']], () => store.view.posture || 'inner', (v) => setView({ posture: v }), 'posture glass-seg'));
+  // live 3D tilt strength for gyro-tilted layers (Duo tilt …)
+  const tilted = () => (store.project?.layers || []).filter((l) => l.gyro?.tilt > 0 && !l.gyro?.fold);
+  const tiltVal = el('output', { class: 'tilt-val' });
+  const tilt = el('input', { type: 'range', min: 0, max: 45, step: 1, class: 'scrub', 'aria-label': '3D tilt strength', title: '3D tilt strength' });
+  tilt.addEventListener('input', () => {
+    const v = Math.max(1, Number(tilt.value));
+    update((p) => {
+      for (const l of p.layers) if (l.gyro?.tilt > 0 && !l.gyro.fold) {
+        l.gyro.tilt = v;
+        l.gyro.tiltV = Math.round(v * 0.35);
+      }
+    }, 'tiltStrength');
+  });
+  const tiltWrap = el('label', { class: 'pill scrub-wrap tilt-wrap' }, [icon('gyro'), tilt, tiltVal]);
+  bar.append(seg, scrubWrap, tiltWrap, posture);
+  $('#topPills .mode')?.before(el('div', { class: 'pill-row' }, [demo, motion, clock, darkBtn]));
   subscribe(() => {
     runSyncs();
     const p = store.project;
     const modern = p?.format !== 'classic';
-    scrubWrap.hidden = !modern;
+    const tl = modern ? tilted() : [];
+    tiltWrap.hidden = !tl.length;
+    scrubWrap.hidden = !modern || (store.view.mode === 'preview' && tl.length > 0);
+    if (tl.length) {
+      const v = Math.max(...tl.map((l) => l.gyro.tilt));
+      if (document.activeElement !== tilt) tilt.value = v;
+      tiltVal.textContent = `${Math.round(v)}°`;
+    }
     if (document.activeElement !== scrub) scrub.value = store.view.progress ?? (store.view.state === 'Unlock' ? 1 : 0);
     darkBtn.hidden = modern || !p?.appearanceAware;
-    darkBtn.textContent = store.view.dark ? '🌙' : '☀️';
+    darkBtn.replaceChildren(icon(store.view.dark ? 'moon' : 'sun'));
     motion.hidden = store.view.mode !== 'preview' || !modern;
     posture.hidden = p?.format !== 'duo';
     clock.classList.toggle('on', store.view.clock);
@@ -218,7 +325,9 @@ async function handleFile(f) {
 // ---------------------------------------------------------------- boot
 
 async function boot() {
-  mountTopbar();
+  mountRail();
+  mountSheet();
+  mountTopPills();
   mountStateBar();
   mountPreview($('#stage'));
   mountPanels($('#panel'));
@@ -229,7 +338,6 @@ async function boot() {
   window.addEventListener('pagehide', () => flushSave());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flushSave());
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-  $('#panelToggle')?.addEventListener('click', () => $('#app').classList.toggle('panel-collapsed'));
   window.__studio = { store, A };
 }
 

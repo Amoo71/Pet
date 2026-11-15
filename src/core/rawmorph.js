@@ -9,6 +9,7 @@
 
 import { readZip, createZip } from './zip.js';
 import { parsePlist } from './plist.js';
+import { toBinaryPlist } from './bplist.js';
 import { EMITTER_PRESETS } from './model.js';
 import { hexToRgb, num, esc } from './caml.js';
 
@@ -99,6 +100,54 @@ function matchingClose(xml, from, kind) {
   return xml.length;
 }
 
+const LAYER_TAG = /<(\/?)(CALayer|CATransformLayer|CAEmitterLayer|CABackdropLayer|CAGradientLayer|CATextLayer|CAShapeLayer|CAReplicatorLayer|CASDFLayer|CASDFElementLayer)\b[^>]*?(\/?)>/g;
+
+/** direct child layers inside the element whose open tag ends at `from` */
+function directChildren(xml, from, end) {
+  const out = [];
+  const re = new RegExp(LAYER_TAG.source, 'g');
+  re.lastIndex = from;
+  let depth = 0;
+  let m;
+  while ((m = re.exec(xml)) && m.index < end) {
+    if (m[1] === '/') {
+      depth--;
+      continue;
+    }
+    if (depth === 0) out.push({ start: m.index, tagEnd: m.index + m[0].length, kind: m[2], self: m[3] === '/' });
+    if (m[3] !== '/') depth++;
+  }
+  return out;
+}
+
+/** put colour-grading filters where PosterBoard renders them: like Apple, on the CALayers
+ *  directly inside BACKGROUND (a CATransformLayer can't filter), else on BACKGROUND / the root */
+function addGrade(xml, filters) {
+  const bg = /<(CALayer|CATransformLayer)\b[^>]*\sname="BACKGROUND"[^>]*?(\/?)>/.exec(xml);
+  let targets = [];
+  if (bg && bg[2] !== '/') {
+    const from = bg.index + bg[0].length;
+    if (bg[1] === 'CALayer') targets = [{ tagEnd: from, kind: 'CALayer' }];
+    else targets = directChildren(xml, from, matchingClose(xml, from)).filter((c) => c.kind === 'CALayer' && !c.self);
+  }
+  if (!targets.length) {
+    const rm = /<caml\b[^>]*>\s*<(CALayer)\b[^>]*?>/.exec(xml);
+    if (!rm || rm[0].endsWith('/>')) return xml;
+    targets = [{ tagEnd: rm.index + rm[0].length, kind: 'CALayer' }];
+  }
+  for (const t of targets.sort((a, b) => b.tagEnd - a.tagEnd)) {
+    const close = matchingClose(xml, t.tagEnd);
+    const sub = xml.indexOf('<sublayers', t.tagEnd);
+    const own = xml.slice(t.tagEnd, sub > -1 && sub < close ? sub : close);
+    const fi = own.indexOf('<filters>');
+    if (fi > -1) {
+      const at = t.tagEnd + fi + '<filters>'.length;
+      xml = xml.slice(0, at) + filters + xml.slice(at);
+    } else xml = xml.slice(0, t.tagEnd) + `<filters>${filters}</filters>` + xml.slice(t.tagEnd);
+  }
+  return xml;
+}
+
 function emitterLayerXml(id, preset, cx, cy, w, h, s, asset) {
   const e = EMITTER_PRESETS[preset];
   const up = Math.sin((e.emissionLongitude || 0) * DEG) < -0.3;
@@ -110,10 +159,12 @@ function emitterLayerXml(id, preset, cx, cy, w, h, s, asset) {
 /**
  * @param {Uint8Array|ArrayBuffer} input  original .tendies
  * @param {string[]} effects  supported: fx-<particle>, vignette
- * @param {{particle:(kind)=>Promise<Uint8Array>, vignette:()=>Promise<Uint8Array>}} assets  PNG makers
+ * @param {{particle:(kind)=>Promise<Uint8Array>, vignette:()=>Promise<Uint8Array>, light?:(hex)=>Promise<Uint8Array>}} assets  PNG makers
+ * @param {object} [tune]  re-program the wallpaper itself (see TUNE_DEFAULTS)
  * @returns {Promise<{zip:Uint8Array, changed:number, wallpapers:number}>}
  */
-export async function rawMorph(input, effects, assets) {
+export async function rawMorph(input, effects, assets, tune = {}) {
+  tune = { ...TUNE_DEFAULTS, ...tune, light: { ...TUNE_DEFAULTS.light, ...(tune.light || {}) } };
   const files = await readZip(input);
   const info = inspectPackage(files);
   if (info.systemOnly) {
@@ -138,6 +189,13 @@ export async function rawMorph(input, effects, assets) {
   }
   if (!targets.length) targets.push(info.camls[0]);
   let changed = 0;
+  // edits of the original (from openPackage / describeCaml indices) – any document, not only targets
+  for (const [path, edits] of Object.entries(tune.edits || {})) {
+    if (!files.has(path)) continue;
+    files.set(path, enc.encode(editCaml(dec.decode(files.get(path)), edits)));
+    changed++;
+  }
+  for (const [path, bytes] of Object.entries(tune.files || {})) files.set(path, bytes);
   for (const camlPath of targets) {
     let xml = dec.decode(files.get(camlPath));
     const t = findTarget(xml, true);
@@ -161,10 +219,88 @@ export async function rawMorph(input, effects, assets) {
         changed++;
       }
     }
+    const L = tune.light;
+    const lightName = 'Light (morph)';
+    if (L.intensity > 0 && assets.light) {
+      const file = 'assets/morph-light.png';
+      files.set(caDir + file, await assets.light(L.color));
+      const size = t.h * (L.size || 0.9);
+      const off = LIGHT_POS[L.pos] || LIGHT_POS.top;
+      // CA is y-up: +y = towards the top of the screen
+      insert += `<CALayer id="morph-light" name="${lightName}" bounds="0 0 ${num(size)} ${num(size)}" position="${num(t.cx + off[0] * t.w)} ${num(t.cy + off[1] * t.h)}" opacity="${num(Math.min(1, L.intensity))}" allowsEdgeAntialiasing="1" allowsGroupOpacity="1" contentsFormat="RGBA8">${L.blend && L.blend !== 'normal' ? `<compositingFilter type="CAFilter" filter="${esc(L.blend)}" name="${esc(L.blend)}"/>` : ''}<contents><CGImage src="${file}"/></contents></CALayer>`;
+      changed++;
+    }
     xml = t.placeholder ? xml.replace('\u0000', insert) : xml.slice(0, t.insertAt) + insert + xml.slice(t.insertAt);
+    // colour grading of the whole wallpaper: filters on the root layer
+    const grade = [];
+    if (tune.brightness) grade.push(`<CAFilter filter="colorBrightness" name="Morph Brightness" enabled="1" inputAmount="${num(tune.brightness)}"/>`);
+    if (tune.contrast !== 1) grade.push(`<CAFilter filter="colorContrast" name="Morph Contrast" enabled="1" inputAmount="${num(tune.contrast)}"/>`);
+    if (tune.saturation !== 1) grade.push(`<CAFilter filter="colorSaturate" name="Morph Saturate" enabled="1" inputAmount="${num(tune.saturation)}"/>`);
+    if (tune.hue) grade.push(`<CAFilter filter="colorHueRotate" name="Morph Hue" enabled="1" inputAngle="${num(tune.hue * DEG)}"/>`);
+    if (grade.length) {
+      const before = xml;
+      xml = addGrade(xml, grade.join(''));
+      if (xml !== before) changed++;
+    }
+    // gyro: scale Apple's own tilt/parallax ranges, add the moving light
+    const gs = /<wallpaperParallaxGroups type="NSArray">([\s\S]*?)<\/wallpaperParallaxGroups>/.exec(xml);
+    if (gs) {
+      let body = gs[1];
+      if (tune.gyro !== 1) {
+        body = body.replace(/<(mapMaxTo|mapMinTo) type="(real|integer)" value="([^"]+)"\/>/g, (_, k, ty, v) => `<${k} type="real" value="${num(Number(v) * tune.gyro)}"/>`);
+        changed++;
+      }
+      if (L.intensity > 0 && L.follow > 0 && assets.light) {
+        const n = L.follow * (t.w / 402);
+        for (const axis of ['x', 'y'])
+          body += `<NSDictionary><axis type="string" value="${axis}"/><image type="null"/><keyPath type="string" value="transform.translation.${axis}"/><layerName type="string" value="${lightName}"/><mapMaxTo type="real" value="${num(axis === 'x' ? n : -n)}"/><mapMinTo type="real" value="${num(axis === 'x' ? -n : n)}"/><title type="string" value="Morph light"/><view type="string" value="Floating"/></NSDictionary>`;
+      }
+      xml = xml.slice(0, gs.index) + `<wallpaperParallaxGroups type="NSArray">${body}</wallpaperParallaxGroups>` + xml.slice(gs.index + gs[0].length);
+    }
     files.set(camlPath, enc.encode(xml));
   }
   return { zip: createZip([...files].map(([path, data]) => ({ path, data }))), changed, wallpapers: targets.length };
+}
+
+export const TUNE_DEFAULTS = {
+  brightness: 0, // -0.4 … 0.4
+  contrast: 1, // 0.5 … 1.8
+  saturation: 1, // 0 … 2
+  hue: 0, // degrees
+  gyro: 1, // × Apple's own tilt / parallax range
+  light: { intensity: 0, color: '#ffd9a0', pos: 'top', blend: 'screenBlendMode', follow: 40, size: 0.9 },
+};
+const LIGHT_POS = { top: [0, 0.36], topLeft: [-0.38, 0.36], topRight: [0.38, 0.36], center: [0, 0], bottom: [0, -0.36] };
+
+/** Apple's system-drawn wallpapers (MercuryPoster): the only knobs are the look, appearance and motion. */
+export const SYSTEM_LOOKS = ['colorA', 'colorB', 'colorC', 'colorD'];
+/** Mercury wallpaper families seen in Apple's files (descriptor.identifier = "<family>.<look>") */
+export const SYSTEM_FAMILIES = [
+  ['v6x', 'iPhone 17e / 18 Pro'],
+  ['v68', 'iPhone Duo – Dunes'],
+];
+export async function tuneSystem(input, { look, appearance, motion, family } = {}) {
+  const files = await readZip(input);
+  let n = 0;
+  for (const [path, bytes] of files) {
+    if (/provider\.descriptor\.identifier$/.test(path) && (family || look)) {
+      const [fam, lk] = new TextDecoder().decode(bytes).trim().split('.');
+      files.set(path, new TextEncoder().encode(`${family || fam}.${look || lk}`));
+      continue;
+    }
+    if (/provider\.contents\.userInfo$/.test(path)) {
+      const u = parsePlist(bytes, true);
+      if (look) u.lookIdentifier = look;
+      if (appearance) u.appearanceMode = appearance;
+      files.set(path, toBinaryPlist(u));
+      n++;
+    } else if (/configurableOptions\.plist$/.test(path) && motion != null) {
+      const o = parsePlist(bytes, true);
+      for (const obj of o.$objects || []) if (obj && typeof obj === 'object' && 'motionEffectsDisabled' in obj) obj.motionEffectsDisabled = !motion;
+      files.set(path, toBinaryPlist(o));
+    }
+  }
+  return { zip: createZip([...files].map(([path, data]) => ({ path, data }))), wallpapers: n };
 }
 
 export const RAW_CAPABLE = (id) => id === 'vignette' || /^fx-\w+$/.test(id);
@@ -181,4 +317,95 @@ export async function prefersRawMorph(input) {
     for (const m of xml.matchAll(/<CATransformLayer\b[^>]*\sname="([^"]*)"/g)) if (!/ Parallax( 2)?$/.test(m[1])) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------- edit the original CAML
+// Everything a wallpaper file exposes, made editable without rebuilding it:
+// gyro groups, swipe/AOD property groups, every named layer (hidden, opacity) and images.
+
+const DICT_RE = /<NSDictionary>([\s\S]*?)<\/NSDictionary>/g;
+const dval = (d, k) => {
+  const m = new RegExp(`<${k} type="(\\w+)"(?: value="([^"]*)")?\\s*/>`).exec(d);
+  return m ? (m[1] === 'null' ? null : m[1] === 'real' || m[1] === 'integer' ? Number(m[2]) : m[2]) : undefined;
+};
+const section = (xml, name) => new RegExp(`<${name} type="NSArray">([\\s\\S]*?)</${name}>`).exec(xml);
+
+/** a readable summary of a CAML document */
+export function describeCaml(xml) {
+  const dicts = (name) => {
+    const s = section(xml, name);
+    return s ? [...s[1].matchAll(DICT_RE)].map((m) => m[1]) : [];
+  };
+  const parallax = dicts('wallpaperParallaxGroups').map((d, i) => ({ i, title: dval(d, 'title'), layerName: dval(d, 'layerName'), keyPath: dval(d, 'keyPath'), axis: dval(d, 'axis'), min: dval(d, 'mapMinTo'), max: dval(d, 'mapMaxTo') }));
+  const props = dicts('wallpaperPropertyGroups').map((d, i) => ({ i, title: dval(d, 'title'), layerName: dval(d, 'layerName'), keyPath: dval(d, 'keyPath'), lock: dval(d, 'v_lock'), home: dval(d, 'v_home'), sleep: dval(d, 'v_sleep') }));
+  const layers = [];
+  const re = new RegExp(LAYER_TAG.source, 'g');
+  let m;
+  while ((m = re.exec(xml))) {
+    if (m[1] === '/') continue;
+    const name = attr(m[0], 'name');
+    if (!name || / \(morph\)$/.test(name) || /^morph-/.test(attr(m[0], 'id') || '')) continue;
+    layers.push({ i: layers.length, name, kind: m[2], hidden: attr(m[0], 'hidden') === '1', opacity: attr(m[0], 'opacity') == null ? 1 : Number(attr(m[0], 'opacity')) });
+  }
+  const images = [...new Set([...xml.matchAll(/<(?:CGImage|contents)\b[^>]*\ssrc="([^"]+)"/g)].map((x) => x[1]))];
+  return { parallax, props, layers, images };
+}
+
+/** apply edits from describeCaml indices: {parallax:{i:{min,max}}, props:{i:{lock,home,sleep}}, layers:{i:{hidden,opacity}}, images:{oldSrc:newSrc}} */
+export function editCaml(xml, e = {}) {
+  const setVal = (d, k, v) => {
+    if (v == null || Number.isNaN(v)) return d;
+    const re = new RegExp(`<${k} type="(real|integer)" value="[^"]*"\\s*/>`);
+    return re.test(d) ? d.replace(re, `<${k} type="real" value="${num(v)}"/>`) : d;
+  };
+  const editSection = (name, map, keys) => {
+    if (!map || !Object.keys(map).length) return;
+    const s = section(xml, name);
+    if (!s) return;
+    let i = -1;
+    const body = s[1].replace(DICT_RE, (all, d) => {
+      i++;
+      const ed = map[i];
+      if (!ed) return all;
+      let out = d;
+      for (const [field, key] of keys) out = setVal(out, key, ed[field]);
+      return `<NSDictionary>${out}</NSDictionary>`;
+    });
+    xml = xml.slice(0, s.index) + `<${name} type="NSArray">${body}</${name}>` + xml.slice(s.index + s[0].length);
+  };
+  editSection('wallpaperParallaxGroups', e.parallax, [['min', 'mapMinTo'], ['max', 'mapMaxTo']]);
+  editSection('wallpaperPropertyGroups', e.props, [['lock', 'v_lock'], ['home', 'v_home'], ['sleep', 'v_sleep']]);
+  if (e.layers && Object.keys(e.layers).length) {
+    let i = -1;
+    const re = new RegExp(LAYER_TAG.source, 'g');
+    xml = xml.replace(re, (tag, close, kind) => {
+      if (close === '/') return tag;
+      const name = attr(tag, 'name');
+      if (!name || / \(morph\)$/.test(name) || /^morph-/.test(attr(tag, 'id') || '')) return tag;
+      i++;
+      const ed = e.layers[i];
+      if (!ed) return tag;
+      let t = tag;
+      const set = (k, v) => {
+        t = new RegExp(`\\s${k}="[^"]*"`).test(t) ? t.replace(new RegExp(`\\s${k}="[^"]*"`), ` ${k}="${v}"`) : t.replace(new RegExp(`^<${kind}\\b`), `<${kind} ${k}="${v}"`);
+      };
+      if (ed.hidden != null) set('hidden', ed.hidden ? 1 : 0);
+      if (ed.opacity != null) set('opacity', num(ed.opacity));
+      return t;
+    });
+  }
+  for (const [from, to] of Object.entries(e.images || {})) xml = xml.split(`src="${from}"`).join(`src="${to}"`);
+  return xml;
+}
+
+/** the Core Animation documents of a package, with what each exposes */
+export async function openPackage(input) {
+  const files = await readZip(input);
+  const info = inspectPackage(files);
+  const docs = info.camls.map((path) => ({
+    path,
+    label: (path.match(/([^/]+)\.wallpaper\//)?.[1] || path.split('/').slice(-3, -2)[0] || 'Wallpaper').replace(/^\d+\./, '') + (/_Floating/i.test(path) ? ' · floating' : /_Background/i.test(path) ? ' · background' : ''),
+    ...describeCaml(dec.decode(files.get(path))),
+  }));
+  return { systemOnly: info.systemOnly, docs };
 }

@@ -1,6 +1,8 @@
 // Tiny DOM + form helpers. Fields register a sync() so panels can refresh values
 // (e.g. after dragging on the canvas) without re-creating inputs and losing focus.
 
+import { icon } from './icons.js';
+
 export function el(tag, attrs = {}, children = []) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -188,11 +190,11 @@ export function toast(msg, kind = 'info', ms = 3200) {
   setTimeout(() => t.remove(), ms + 400);
 }
 
-export function modal(title, content, actions = []) {
+export function modal(title, content, actions = [], o = {}) {
   const close = () => back.remove();
-  const back = el('div', { class: 'modal-back', onclick: (e) => e.target === back && close() }, [
-    el('div', { class: 'modal', role: 'dialog', 'aria-label': title }, [
-      el('div', { class: 'modal-head' }, [el('h2', {}, title), el('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, '✕')]),
+  const back = el('div', { class: `modal-back ${o.sheet ? 'as-sheet' : ''}`, onclick: (e) => e.target === back && close() }, [
+    el('div', { class: `modal ${o.wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title }, [
+      el('div', { class: 'modal-head' }, [el('h2', {}, title), el('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, icon('close'))]),
       el('div', { class: 'modal-body' }, content),
       actions.length ? el('div', { class: 'modal-actions' }, actions.map(([t, fn, cls]) => button(t, () => fn(close), cls))) : null,
     ]),

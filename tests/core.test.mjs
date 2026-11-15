@@ -2,7 +2,7 @@
 import { newProject, newLayer, newAnim, migrateProject } from '../src/core/model.js';
 import { buildTendies, buildBatter, validateProject } from '../src/core/tendies.js';
 import { readZip, createZip } from '../src/core/zip.js';
-import { rawMorph, prefersRawMorph } from '../src/core/rawmorph.js';
+import { rawMorph, prefersRawMorph, tuneSystem } from '../src/core/rawmorph.js';
 import { parsePlist } from '../src/core/plist.js';
 import { toBinaryPlist } from '../src/core/bplist.js';
 import { PCA_FILES } from '../src/core/template-data.js';
@@ -194,11 +194,28 @@ assert.equal(old.layers[0].anims[0].preset, 'spin');
   assert(/<CATransformLayer id="FLOATING"[^>]*><sublayers><CALayer id="morph-snow"/.test(out), 'snow goes into FLOATING');
   assert(out.includes('<CAEmitterLayer') && out.includes('morph-vignette'));
   assert(z.has(base + 'wallpaper.ca/assets/morph-snow.png') && z.has(base + 'wallpaper.ca/assets/Level-1-right.HEIC'));
+  // re-program: grading lands on the CALayer inside the BACKGROUND transform layer, light follows the gyro
+  const camlG = caml.replace('<CATransformLayer name="_RIGHT_GYRO_TRANSFORM_1">', '<CALayer name="_SCALE_X"><sublayers><CATransformLayer name="_RIGHT_GYRO_TRANSFORM_1">').replace('</CATransformLayer></sublayers></CATransformLayer><CATransformLayer id="FLOATING"', '</CATransformLayer></sublayers></CALayer></sublayers></CATransformLayer><CATransformLayer id="FLOATING"').replace('</caml>', '<style><wallpaperParallaxGroups type="NSArray"><NSDictionary><mapMaxTo type="real" value="0.12"/><mapMinTo type="real" value="-0.12"/></NSDictionary></wallpaperParallaxGroups></style></caml>');
+  const pkg2 = createZip([
+    { path: base + 'Wallpaper.plist', data: toBinaryPlist({ assets: { lockAndHome: { default: { type: 'ParameterizedCA' } } } }) },
+    { path: base + 'wallpaper.ca/main.caml', data: enc.encode(camlG) },
+  ]);
+  const r2 = await rawMorph(pkg2, [], { light: async () => PNG }, { saturation: 1.4, gyro: 2, light: { intensity: 0.5 } });
+  const out2 = text((await readZip(r2.zip)).get(base + 'wallpaper.ca/main.caml'));
+  assert(/<CALayer name="_SCALE_X"><filters><CAFilter filter="colorSaturate"/.test(out2), 'grading on _SCALE_X');
+  assert(out2.includes('<mapMaxTo type="real" value="0.24"/>'), 'gyro ×2');
+  assert(out2.includes('value="Light (morph)"') && out2.includes('id="morph-light"'), 'gyro light');
   // our own exports are not "raw"
   const own = await buildTendies(makeProject('modern').p, render);
   assert.equal(await prefersRawMorph(own), false, 'own exports stay editable');
   // system-rendered (MercuryPoster) descriptors
   const sys = createZip([{ path: 'Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/X/com.apple.posterkit.provider.descriptor.identifier', data: enc.encode('x') }]);
   await assert.rejects(() => rawMorph(sys, ['fx-snow'], {}), (e) => e.code === 'system_only');
+  const sys2 = createZip([{ path: 'X/versions/0/contents/com.apple.posterkit.provider.contents.userInfo', data: toBinaryPlist({ appearanceMode: 'Automatic', lookIdentifier: 'colorA' }) }]);
+  const sys3 = createZip([{ path: 'X/com.apple.posterkit.provider.descriptor.identifier', data: enc.encode('v6x.colorC') }]);
+  const t3 = await tuneSystem(sys3, { family: 'v68', look: 'colorB' });
+  assert.equal(text((await readZip(t3.zip)).get('X/com.apple.posterkit.provider.descriptor.identifier')), 'v68.colorB', 'switch to Duo Dunes');
+  const t = await tuneSystem(sys2, { look: 'colorD' });
+  assert.equal(parsePlist((await readZip(t.zip)).get('X/versions/0/contents/com.apple.posterkit.provider.contents.userInfo')).lookIdentifier, 'colorD');
 }
 console.log('OK');

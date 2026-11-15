@@ -6,6 +6,7 @@ import { validateProject } from '../core/tendies.js';
 import { layerBitmapURL } from './assets.js';
 import { el, numField, colorField, selectField, toggleField, textField, segmented, section, button, resetSyncs, runSyncs, toast } from './dom.js';
 import * as A from './actions.js';
+import { icon } from './icons.js';
 
 let host;
 let lastKey = '';
@@ -26,14 +27,11 @@ export function mountPanels(root) {
   render();
 }
 
-function tabs() {
-  const t = [
-    ['layers', 'Layers'],
-    ['style', 'Style'],
-    ['motion', 'Motion'],
-    ['project', 'Project'],
-  ];
-  return el('nav', { class: 'tabs', role: 'tablist' }, t.map(([id, name]) => el('button', { type: 'button', role: 'tab', class: `tab ${store.view.tab === id ? 'on' : ''}`, 'data-tab': id, 'aria-selected': String(store.view.tab === id), onclick: () => setView({ tab: id }) }, name)));
+const TITLES = { layers: 'Layers', style: 'Style', motion: 'Motion', project: 'Project' };
+
+function head() {
+  const close = el('button', { type: 'button', class: 'icon-btn panel-close', 'aria-label': 'Close panel', onclick: (e) => (e.stopPropagation(), (document.getElementById('app').dataset.panel = 'closed'), setView({})) }, icon('close'));
+  return el('div', { class: 'panel-head' }, [el('div', { class: 'grabber' }), el('h2', {}, TITLES[store.view.tab] || ''), close]);
 }
 
 function render() {
@@ -47,7 +45,7 @@ function render() {
   else if (tab === 'style') body.append(...stylePanel());
   else if (tab === 'motion') body.append(...motionPanel());
   else body.append(...projectPanel());
-  host.append(tabs(), body);
+  host.append(head(), body);
   body.scrollTop = scroll;
 }
 
@@ -76,11 +74,11 @@ function layersPanel() {
   const lists = [...PLANES].reverse().map((plane) => {
     const layers = p.layers.filter((l) => l.plane === plane.id).reverse();
     return el('div', { class: 'plane-group' }, [
-      el('div', { class: 'plane-head' }, [el('b', {}, plane.name), el('small', {}, plane.id === 'floating' ? 'depth effect · above the clock' : 'wallpaper · under the clock')]),
+      el('div', { class: 'plane-head' }, [el('b', {}, plane.name), el('small', {}, plane.id === 'floating' ? 'above clock' : 'under clock')]),
       layers.length ? el('ul', { class: 'layer-list' }, layers.map(layerRow)) : el('p', { class: 'empty' }, 'No layers'),
     ]);
   });
-  return [add, ...lists, el('p', { class: 'hint' }, 'Tip: tap the same spot again to select the layer underneath. Higher in the list = closer to you.')];
+  return [add, ...lists];
 }
 
 function layerRow(l) {
@@ -265,11 +263,6 @@ function kindFields(l, p) {
           el('span', { class: 'field-label' }, 'Mode'),
           segmented([['frosted', 'Frosted', 'Baked blur – works on every iOS'], ['liquid', 'Liquid Glass', 'iOS 26+ refraction (CABackdropLayer + SDF)'], ['live', 'Live blur', 'CABackdropLayer blur – experimental']], () => gl().mode, G('mode', String)),
         ]),
-        el('p', { class: 'muted' }, {
-          frosted: 'Frosted: the layers behind are blurred into the image at export – reliable everywhere, but it won’t follow layers that move behind it.',
-          liquid: 'Liquid Glass: Apple’s iOS 26 refraction effect via CABackdropLayer + CASDFGlassDisplacementEffect (as exported by CAPlayground). Live on device, experimental.',
-          live: 'Live blur: CABackdropLayer with a gaussian blur filter. Follows content live; experimental on device.',
-        }[gl().mode]),
         numField('Corner radius', () => selectedLayer().cornerRadius, (v) => L((x) => (x.cornerRadius = Math.max(0, v)), g('gcr')), { min: 0, max: 300, slider: true, unit: 'pt' }),
         gl().mode !== 'liquid' ? numField('Blur', () => gl().blur, G('blur'), { min: 0, max: 80, slider: true, unit: 'pt' }) : numField('Refraction', () => gl().refraction ?? 80, G('refraction'), { min: 0, max: 200, slider: true }),
         numField('Saturation', () => gl().saturation, G('saturation'), { min: 0, max: 3, step: 0.05, slider: true }),
@@ -284,7 +277,7 @@ function kindFields(l, p) {
       const e = () => selectedLayer().emitter;
       const E = (k, parse = Number) => (val) => L((x) => (x.emitter = { ...x.emitter, [k]: parse(val) }), g(`e${k}`));
       f.push(
-        el('p', { class: 'warn-note' }, 'Experimental: CAEmitterLayer renders on device but is barely tested by the community – and particles keep the screen redrawing (battery).'),
+        el('p', { class: 'warn-note' }, 'Particles redraw continuously – uses battery.'),
         selectField('Preset', Object.entries(EMITTER_PRESETS).map(([k, v]) => [k, v.name]), () => e().preset, (k) => L((x) => (x.emitter = { preset: k, ...EMITTER_PRESETS[k], particleAsset: x.emitter.particleAsset }))),
         selectField('Particle', [['dot', 'Soft dot'], ['star', 'Star'], ['streak', 'Streak'], ['ring', 'Bubble'], ['petal', 'Petal'], ['square', 'Confetti']], () => e().particle, E('particle', String)),
         el('div', { class: 'btn-row' }, [
@@ -354,9 +347,6 @@ function motionPanel() {
 
   out.push(
     section('Swipe effects', [
-      el('p', { class: 'muted' }, modern
-        ? 'Modern format: values move with your finger while swiping up (and back when pulling down). Try it with ▶ Preview.'
-        : 'Classic format: after the swipe completes, values spring to the new state.'),
       el('div', { class: 'chip-grid' }, RECIPES.map(([name, fn]) => el('button', { type: 'button', class: 'chip', onclick: () => update((proj) => fn(proj.layers.find((x) => x.id === l.id), proj)) }, name))),
     ])
   );
@@ -382,7 +372,6 @@ function motionPanel() {
   });
   out.push(
     section('States', [
-      el('p', { class: 'muted' }, 'Pick a state, then drag / scale / rotate the layer on the canvas. PosterBoard switches states itself: Lock, Home (after unlocking) and Always-On.'),
       ...rows,
       modern ? toggleField('Fast fade', () => selectedLayer().fastFade, (v) => L((x) => (x.fastFade = v)), 'Quadratic fade via two nested layers – disappears quicker, less double exposure (device-verified technique)') : null,
       Object.keys(l.states).length ? button('Reset all states of this layer', () => update((pp) => (pp.layers.find((x) => x.id === l.id).states = {})), 'danger subtle') : null,
@@ -395,14 +384,13 @@ function motionPanel() {
     out.push(
       section('Gyro', [
         numField('Move', () => selectedLayer().parallax || 0, (v) => L((x) => (x.parallax = Math.max(0, v)), g('px')), { min: 0, max: 60, slider: true, unit: 'pt' }),
-        el('p', { class: 'muted' }, 'Shift when the phone tilts (device-verified). Far 4–8 · middle 10–14 · near 20–40 – nearer layers move more.'),
+        el('p', { class: 'muted' }, 'Far 4–8 · middle 10–14 · near 20–40'),
         numField('3D tilt', () => gy().tilt || 0, GY('tilt'), { min: 0, max: 45, slider: true, unit: '°' }),
         numField('Fold (Duo)', () => gy().fold || 0, GY('fold'), { min: 0, max: 90, slider: true, unit: '°' }),
         el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Pivot'), segmented([['0.5,0.5', 'Center'], ['1,0.5', 'Right edge'], ['0,0.5', 'Left edge'], ['0.5,1', 'Bottom'], ['0.5,0', 'Top']], () => { const a = selectedLayer().anchor || { x: 0.5, y: 0.5 }; return `${a.x},${a.y}`; }, (v) => L((x) => { const [ax, ay] = v.split(',').map(Number); x.anchor = { x: ax, y: ay }; }))]),
         el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Gyro fade'), segmented([['none', 'Off'], ['x', '← →'], ['-x', '→ ←'], ['y', '↑ ↓'], ['-y', '↓ ↑']], () => gy().fade || 'none', GY('fade', String))]),
         gy().fade && gy().fade !== 'none' ? numField('Fade from', () => gy().fadeMin ?? 0, GY('fadeMin'), { min: 0, max: 1, step: 0.05, slider: true }) : null,
         gy().fade && gy().fade !== 'none' ? numField('Fade to', () => gy().fadeMax ?? 1, GY('fadeMax'), { min: 0, max: 1, step: 0.05, slider: true }) : null,
-        el('p', { class: 'muted' }, '3D tilt rotates the layer with the phone; Gyro fade changes opacity as you tilt (e.g. reveal a hidden layer). Both are experimental. Preview: ▶ Preview + move the mouse, or 🧭 Motion on iPhone.'),
       ])
     );
   } else {
@@ -419,7 +407,7 @@ function motionPanel() {
   const anims = l.anims || [];
   out.push(
     section(`Animations (${anims.length})`, [
-      hasLoops(l) ? el('p', { class: 'warn-note' }, '🔋 Endless animations keep the lock screen redrawing (~30% vs ~4% CPU idle, measured on device). For battery-friendly wallpapers use swipe effects instead, or “Play once”.') : null,
+      hasLoops(l) ? el('p', { class: 'warn-note' }, '🔋 Endless loops use more battery – prefer swipe effects or “Play once”.') : null,
       ...anims.map((a, i) => animCard(l, a, i)),
       el('div', { class: 'chip-grid' }, Object.entries(ANIM_PRESETS).map(([k, v]) => el('button', { type: 'button', class: 'chip add', 'data-anim': k, onclick: () => A.addAnimation(l.id, k) }, `+ ${v.name}`))),
     ])
@@ -503,9 +491,9 @@ function projectPanel() {
       selectField('Device', DEVICES.map((x) => [x.id, `${x.name} · ${x.w}×${x.h}`]), () => store.project.device, (v) => A.changeDevice(v)),
       el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Format'), segmented([['modern', 'Modern'], ['duo', 'Duo'], ['classic', 'Classic']], () => store.project.format || 'modern', (v) => A.setFormat(v))]),
       el('p', { class: 'muted' }, {
-        modern: 'Modern (iOS 26/27): one ParameterizedCA bundle – values follow your finger, gyro, iOS 27 depth fix.',
-        duo: 'Duo (iPhone Duo foldable, iOS 27): your square scene is framed separately for the cover screen and the inner display (portrait + landscape), with gyro and depth.',
-        classic: 'Classic (iOS 17+): three LayeredAnimation bundles with spring transitions and Light/Dark states. Loses gyro on iOS 27.',
+        modern: 'iOS 26 / 27 · follows your finger · gyro',
+        duo: 'iPhone Duo · cover + inner screen',
+        classic: 'iOS 17+ · spring states · no gyro on iOS 27',
       }[p.format || 'modern']),
       modern ? numField('3D perspective (0 = flat, Apple style)', () => store.project.perspective ?? 900, (v) => P((pp) => (pp.perspective = v < 100 ? 0 : v), 'persp'), { min: 0, max: 3000, step: 10, slider: true, unit: 'pt' }) : null,
       !modern ? toggleField('Light / Dark variants', () => store.project.appearanceAware, (v) => P((pp) => (pp.appearanceAware = v)), 'Adds Locked/Unlock/Sleep Light & Dark states') : null,
@@ -515,7 +503,6 @@ function projectPanel() {
     section('Export & import', [
       button('⬇︎ Export…', () => A.openExport(), 'primary wide'),
       button('Import .tendies to edit…', () => A.importTendiesFile(), 'wide'),
-      el('p', { class: 'muted' }, 'Collections: open the Library (☰), tick several wallpapers → “Export as collection”.'),
     ]),
     section('Install on iPhone', [installGuide()], { closed: true }),
     section('App', [button('Settings (GIF search keys)…', () => A.openSettings(), 'wide')], { closed: true }),
