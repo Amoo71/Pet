@@ -199,6 +199,18 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await (await sdl).saveAs(sfile);
   assert(fs.readFileSync(sfile).includes(Buffer.from('colorC')), 'look switched');
 
+  // new shell: rail toggles the inspector, Duo 3D preview opens
+  await pg.keyboard.press('Escape');
+  await pg.evaluate(() => document.querySelectorAll('.modal-back').forEach((m) => m.remove()));
+  await pg.click('.rail-btn.tab[data-tab="style"]');
+  const undoLen = await pg.evaluate(() => window.__studio.store.undo.length);
+  await pg.click('.rail-btn.tab[data-tab="style"]');
+  assert.equal(await pg.evaluate(() => document.getElementById('app').dataset.panel), 'closed', 'tapping the active tab closes the panel');
+  assert.equal(await pg.evaluate(() => window.__studio.store.undo.length), undoLen, 'panel toggling is not an undo step');
+  await pg.click('.rail-btn.tab[data-tab="layers"]');
+  assert.equal(await pg.evaluate(() => document.getElementById('app').dataset.panel), 'open');
+  await pg.click('#duoBtn');
+  await pg.waitForSelector('duo-fold');
   assert.deepEqual(errors, []);
   console.log('E2E OK →', OUT);
   await browser.close();

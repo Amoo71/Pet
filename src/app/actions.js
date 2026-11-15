@@ -703,6 +703,29 @@ async function systemTuneFlow(list, rm) {
   toast('Exported – install the ✦ file with Placard.', 'ok', 5000);
 }
 
+// ---------------------------------------------------------------- Duo fold preview (WebGL2 <duo-fold>)
+
+/** Shows the current wallpaper on a 3D iPhone Duo that folds (inner screen blur + darkening, cover screen). */
+export async function openDuoPreview() {
+  await import('../browser/duo-fold.js');
+  const { compositeLayers } = await import('./assets.js');
+  const p = store.project;
+  if (!p) return;
+  const DUO_FX = ['duotilt', 'duo'];
+  // the flat picture: original layers (Duo rigs are 3D-only), background first
+  const flat = p.layers.filter((l) => !DUO_FX.includes(l.fx)).map((l) => ({ ...l, hidden: false }));
+  const order = [...flat.filter((l) => l.plane === 'background'), ...flat.filter((l) => l.plane !== 'background')];
+  const canvas = await compositeLayers(p, order, 2);
+  const fold = el('duo-fold', { class: 'duo-fold', controls: true, orbit: true, clock: true, recenter: true, 'fold-on-click': true, color: '#2b2b2e' });
+  fold.source = canvas;
+  const seg = segmented([['180', 'Open'], ['90', 'Half'], ['0', 'Closed']], () => '', (v) => fold.foldTo(Number(v), 900), 'glass-seg');
+  const auto = button('Auto', () => (fold.hasAttribute('autoplay') ? fold.removeAttribute('autoplay') : fold.setAttribute('autoplay', '')), 'small');
+  modal('iPhone Duo', [fold, el('div', { class: 'duo-bar' }, [seg, auto])], [], { wide: true });
+  requestAnimationFrame(() => {
+    fold.source = canvas;
+  });
+}
+
 // ---------------------------------------------------------------- 3D photo (depth layers + gyro)
 
 export async function add3DPhoto() {

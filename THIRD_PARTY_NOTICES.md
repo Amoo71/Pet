@@ -28,3 +28,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## iphone-duo-fold-preview (jadon7) – MIT
+
+`src/browser/duo-fold.js` (the `<duo-fold>` WebGL2 component used for the 3D iPhone Duo preview)
+is inspired by https://github.com/254558/iphone-duo-fold-preview (MIT, jadon7): hinge fold with a
+Hermite crease, fixed front-view projection, image-space blur and darkening.
