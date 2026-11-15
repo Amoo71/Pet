@@ -397,13 +397,82 @@ export function changeDevice(id) {
   });
 }
 
+// ---------------------------------------------------------------- browse public catalogs
+
+export async function openBrowse(initial = 'apple') {
+  const cat = await import('../browser/catalog.js');
+  const state = { col: initial, q: '', items: [], shown: 60, ctrl: null };
+  const grid = el('div', { class: 'cat-grid' });
+  const status = el('p', { class: 'muted' }, 'Loading…');
+  const more = button('Show more', () => ((state.shown += 60), draw()), 'subtle');
+  const search = el('input', { type: 'search', class: 'text', placeholder: 'Search wallpapers…', id: 'catSearch', autocomplete: 'off' });
+  const tabs = segmented(cat.COLLECTIONS.map((c) => [c.id, c.name]), () => state.col, (v) => {
+    state.col = v;
+    tabs.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    load();
+  }, 'cat-tabs');
+  const card = (w) => {
+    const isVideo = /\.(mp4|mov|webm)$/i.test(w.preview);
+    const media = w.preview ? (isVideo ? el('video', { src: w.preview, muted: true, autoplay: true, loop: true, playsinline: true }) : el('img', { src: w.preview, loading: 'lazy', alt: w.name })) : el('div', { class: 'cat-noimg' }, '◐');
+    const c = el('div', { class: 'cat-card' }, [
+      el('div', { class: 'cat-media' }, media),
+      el('div', { class: 'cat-meta' }, [el('b', {}, w.name), el('small', {}, [w.author || w.source, w.description ? ` · ${w.description}` : ''])]),
+      el('div', { class: 'btn-row' }, [button('Open', () => fetchAndOpen(w, false)), button('✨ Morph', () => fetchAndOpen(w, true), 'primary')]),
+    ]);
+    return c;
+  };
+  const draw = () => {
+    const q = state.q.trim().toLowerCase();
+    const list = q ? state.items.filter((w) => `${w.name} ${w.author || ''} ${w.description || ''}`.toLowerCase().includes(q)) : state.items;
+    grid.innerHTML = '';
+    list.slice(0, state.shown).forEach((w) => grid.append(card(w)));
+    more.hidden = list.length <= state.shown;
+    status.textContent = `${list.length} wallpaper${list.length === 1 ? '' : 's'} · from public GitHub repos (Placard sources)`;
+  };
+  const load = async () => {
+    state.ctrl?.abort();
+    state.ctrl = new AbortController();
+    status.textContent = 'Loading…';
+    grid.innerHTML = '';
+    state.shown = 60;
+    try {
+      state.items = await cat.loadCollection(state.col, state.ctrl.signal);
+      draw();
+    } catch (e) {
+      if (e.name !== 'AbortError') status.textContent = `Couldn’t load this collection (${e.message}). Check your connection.`;
+    }
+  };
+  let t = 0;
+  search.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => ((state.q = search.value), (state.shown = 60), draw()), 200);
+  });
+  const close = modal('🌐 Browse wallpapers', [el('div', { class: 'gif-bar' }, [search, tabs]), status, grid, more]);
+  const fetchAndOpen = async (w, morph) => {
+    close();
+    const pm = progressModal(`Downloading “${w.name}”…`);
+    try {
+      const bytes = await cat.downloadTendies(w.url, (got, total) => pm.set(got, total, `${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`), pm.signal);
+      pm.close();
+      const file = new File([bytes], `${w.name}.tendies`);
+      const projects = await importTendiesFile(file);
+      if (morph && projects?.length) await openEffects();
+    } catch (e) {
+      pm.close();
+      if (e.name !== 'AbortError') toast(`Download failed: ${e.message}`, 'error', 6000);
+    }
+  };
+  load();
+}
+
 // ---------------------------------------------------------------- effects / morph mode
 
 function effectsForm(state) {
   const { EFFECTS, DUO_DEFAULTS } = state.mod;
-  state.ids ||= new Set(['duo']);
+  state.ids ||= new Set(state.applied?.length ? state.applied : ['duotilt']);
   state.duo ||= { ...DUO_DEFAULTS };
   const duoOpts = el('div', { class: 'form duo-opts' }, [
+    numField('Tilt angle', () => state.duo.tilt, (v) => (state.duo.tilt = v), { min: 4, max: 30, step: 1, slider: true, unit: '°' }),
     numField('Fold angle', () => state.duo.angle, (v) => (state.duo.angle = v), { min: 15, max: 90, step: 1, slider: true, unit: '°' }),
     numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 60, step: 1, slider: true, unit: 'pt' }),
     numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 0.9, step: 0.02, slider: true }),
@@ -414,26 +483,26 @@ function effectsForm(state) {
     b.addEventListener('click', () => {
       state.ids.has(fx.id) ? state.ids.delete(fx.id) : state.ids.add(fx.id);
       b.classList.toggle('on', state.ids.has(fx.id));
-      duoOpts.hidden = !state.ids.has('duo');
+      duoOpts.hidden = !state.ids.has('duo') && !state.ids.has('duotilt');
     });
     return b;
   }));
-  duoOpts.hidden = !state.ids.has('duo');
-  return [grid, duoOpts, el('p', { class: 'muted' }, 'Duo fold, 3D tilt and gyro fade use gyro key paths beyond plain translation – experimental on device. Gyro needs the Modern format, effects switch to it automatically.')];
+  duoOpts.hidden = !state.ids.has('duo') && !state.ids.has('duotilt');
+  return [state.applied?.length ? el('p', { class: 'muted' }, 'Highlighted = already on this wallpaper. Tap one to turn it off, then Apply.') : null, grid, duoOpts, el('p', { class: 'muted' }, 'Duo fold, 3D tilt and gyro fade use gyro key paths beyond plain translation – experimental on device. Gyro needs the Modern format, effects switch to it automatically.')];
 }
 
 export async function openEffects() {
   const mod = await import('./effects.js');
-  const state = { mod };
-  const go = await new Promise((resolve) => modal('✨ Add effects', effectsForm(state), [['Cancel', (c) => (c(), resolve(false))], ['Apply', (c) => (c(), resolve(true)), 'primary']]));
-  if (!go || !state.ids.size) return;
+  const state = { mod, applied: mod.appliedEffects(store.project) };
+  const go = await new Promise((resolve) => modal('✨ Effects', effectsForm(state), [['Cancel', (c) => (c(), resolve(false))], ['Apply', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
   const pm = progressModal('Adding effects…');
   try {
     const apply = await mod.prepareEffects(store.project, [...state.ids], { duo: state.duo });
     let done = [];
     update((p) => (done = apply(p)));
     pm.close();
-    toast(`Added: ${done.join(', ')} – try ▶ Preview and tilt.`, 'ok', 6000);
+    toast(done.length ? `${done.join(', ')} – try ▶ Preview and tilt.` : 'No changes.', 'ok', 6000);
   } catch (e) {
     pm.close();
     console.error(e);

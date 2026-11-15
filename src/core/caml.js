@@ -352,8 +352,9 @@ export function layerGyroGroups(layer, name) {
   const f = layer.gyro?.fade;
   if (f && f !== 'none') {
     const axis = f.replace('-', '');
-    const lo = Math.max(0, Math.min(1, layer.gyro.fadeMin ?? 0));
-    const hi = Math.max(0, Math.min(1, layer.gyro.fadeMax ?? 1));
+    // values below 0 are allowed so a fade can stay invisible until the phone passes level
+    const lo = Math.max(-1, Math.min(1, layer.gyro.fadeMin ?? 0));
+    const hi = Math.max(-1, Math.min(1, layer.gyro.fadeMax ?? 1));
     const flip = f.startsWith('-');
     out.push({ name: `${name} GyroFade`, axis, keyPath: 'opacity', min: flip ? hi : lo, max: flip ? lo : hi, type: 'real' });
   }

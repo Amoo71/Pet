@@ -26,6 +26,7 @@ function mountTopbar() {
   const addBtn = el('button', { class: 'btn add-main', id: 'addBtn', onclick: openAddMenu }, '＋ Add');
   bar.append(
     el('button', { class: 'icon-btn', title: 'Library', 'aria-label': 'Library', id: 'libBtn', onclick: openLibrary }, '☰'),
+    el('button', { class: 'icon-btn', title: 'Browse wallpapers', 'aria-label': 'Browse wallpapers', id: 'browseBtn', onclick: () => A.openBrowse() }, '🌐'),
     el('div', { class: 'brand' }, [el('span', { class: 'logo' }), el('span', { class: 'brand-name' }, 'Tendies Studio')]),
     name,
     el('div', { class: 'spacer' }),
@@ -132,6 +133,7 @@ async function openLibrary() {
   const close = modal('Library', [el('h3', {}, 'Start from a template'), templates, el('h3', {}, `Your wallpapers (${list.length})`), list.length ? grid : el('p', { class: 'muted' }, 'No projects yet.')], [
     ['Import .tendies', async (c) => { c(); await A.importTendiesFile(); }],
     ['✨ Morph .tendies', async (c) => { c(); await A.morphTendies(); }],
+    ['🌐 Browse', (c) => { c(); A.openBrowse(); }],
     ['How to install', (c) => { c(); modal('Install on iPhone', installGuide()); }],
   ]);
   document.querySelector('.modal-actions')?.prepend(collectBtn);

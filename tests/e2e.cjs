@@ -140,7 +140,13 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   // effects: Duo fold on the 3D photo project
   await pg.click('[data-add="effects"]');
   await pg.click('.modal-actions button:has-text("Apply")');
-  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0), null, { timeout: 60000 });
+  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.fx === 'duotilt' && x.gyro.tilt > 0), null, { timeout: 60000 });
+  // turn it off again → the original layers come back
+  await pg.click('[data-add="effects"]');
+  await pg.click('.fx[data-fx="duotilt"]');
+  await pg.click('.fx[data-fx="duo"]');
+  await pg.click('.modal-actions button:has-text("Apply")');
+  await pg.waitForFunction(() => { const p = window.__studio.store.project; return !p.layers.some((x) => x.fx === 'duotilt') && p.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0) && p.layers.filter((x) => !x.fx).every((x) => !x.hidden); }, null, { timeout: 60000 });
   // Duo template + postures
   await pg.click('#libBtn');
   await pg.click('.tpl[data-tpl="duo3d"]');

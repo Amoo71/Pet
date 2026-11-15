@@ -15,6 +15,7 @@ import { makeCanvas, canvasToBlob } from '../browser/raster.js';
 const PARTICLES = ['snow', 'rain', 'sparkle', 'stars', 'bubbles', 'embers', 'petals', 'confetti'];
 
 export const EFFECTS = [
+  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'Smooth 3D tilt with the gyro; the side that tips away blurs and darkens.' },
   { id: 'duo', icon: '📖', name: 'Duo fold', desc: 'iPhone Duo fold: the left half folds on its hinge as you tilt (blur + shade follow).' },
   { id: 'depth', icon: '🧊', name: 'Depth parallax', desc: 'Gives every layer gyro parallax – back layers move less, front layers more.' },
   { id: 'unlockZoom', icon: '🔍', name: 'Unlock zoom', desc: 'Background pushes in while you swipe up.' },
@@ -24,7 +25,9 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 22, shade: 0.52, unlock: true };
+export const DUO_DEFAULTS = { angle: 60, blur: 22, shade: 0.52, unlock: true, tilt: 14 };
+
+const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
 async function canvasAsset(canvas, type = 'image/png', q = 0.9) {
   const blob = await canvasToBlob(canvas, type, q);
@@ -144,16 +147,86 @@ export async function duoLayers(project, picture, o = DUO_DEFAULTS) {
   return layers;
 }
 
-/** Apply effects to a project in place (call inside store.update). Returns a short summary. */
+/** edge strip for Duo 3D tilt: blurred + darkened picture, opaque at one side fading to 0 */
+function edgeStrip(pic, radius, side, shade) {
+  const W = pic.width;
+  const H = pic.height;
+  const c = makeCanvas(W, H);
+  const x = c.getContext('2d');
+  const pad = radius * 2;
+  x.filter = `blur(${radius}px)`;
+  x.drawImage(pic, -pad, -pad, W + pad * 2, H + pad * 2);
+  x.filter = 'none';
+  x.fillStyle = `rgba(0,0,0,${shade})`;
+  x.fillRect(0, 0, W, H);
+  const g = side === 'left' ? x.createLinearGradient(0, 0, W * 0.42, 0) : x.createLinearGradient(W, 0, W * 0.58, 0);
+  g.addColorStop(0, 'rgba(0,0,0,1)');
+  g.addColorStop(0.45, 'rgba(0,0,0,0.6)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in';
+  x.fillStyle = g;
+  x.fillRect(0, 0, W, H);
+  return c;
+}
+
+/** Duo 3D tilt: the whole picture tilts with the gyro; the side tipping away blurs + darkens. */
+export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
+  const W = project._w;
+  const H = project._h;
+  const pic = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), 3);
+  const r = Math.max(6, o.blur * 3);
+  const ids = {
+    pic: await canvasAsset(pic, 'image/jpeg'),
+    left: await canvasAsset(edgeStrip(pic, r, 'left', o.shade * 0.6)),
+    right: await canvasAsset(edgeStrip(pic, r, 'right', o.shade * 0.6)),
+  };
+  const k = 1.1; // bleed so tilting never shows the edge
+  const base = { x: W / 2, y: H / 2, w: Math.round(W * k), h: Math.round(H * k), fit: 'stretch', plane: 'background', parallax: 6 };
+  const tilt = o.tilt || 14;
+  const backdrop = newLayer('color', project, { name: 'Duo tilt backdrop', color: '#000000', plane: 'background' });
+  const panel = newLayer('image', project, { ...base, name: 'Duo tilt', asset: ids.pic, gyro: { tilt, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 }, states: o.unlock ? { Unlock: { scale: 1.05 }, Sleep: { scale: 0.96 } } : {} });
+  // left side tips away when tilting left (tilt x < 0) – fade maps tilt -1…1 to opacity 1…-1 (clamped)
+  const left = newLayer('image', project, { ...base, name: 'Duo tilt blur L', asset: ids.left, gyro: { tilt, fold: 0, fade: '-x', fadeMin: -1, fadeMax: 1 }, states: panel.states });
+  const right = newLayer('image', project, { ...base, name: 'Duo tilt blur R', asset: ids.right, gyro: { tilt, fold: 0, fade: 'x', fadeMin: -1, fadeMax: 1 }, states: panel.states });
+  return { layers: [backdrop, panel, left, right], hideOthers: true };
+}
+
+/**
+ * Bring a project to the chosen effect set. Effects not in `ids` are removed again
+ * (layers tagged with `fx`, plus recorded changes to existing layers).
+ * Async work happens here; the returned function mutates the project synchronously.
+ */
 export async function prepareEffects(project, ids, opts = {}) {
-  // everything async (bitmaps) happens here; the returned function mutates synchronously
-  const add = [];
-  if (ids.includes('duo')) add.push(...(await duoLayers(project, opts.picture || null, { ...DUO_DEFAULTS, ...(opts.duo || {}) })));
+  const want = new Set(ids);
+  const have = new Set(appliedEffects(project));
+  const duo = { ...DUO_DEFAULTS, ...(opts.duo || {}) };
+  const added = {};
+  if (want.has('duo') && !have.has('duo')) added.duo = tag(await duoLayers(project, opts.picture || null, duo), 'duo');
+  if (want.has('duotilt') && !have.has('duotilt')) added.duotilt = tag((await duoTiltLayers(project, duo)).layers, 'duotilt');
   return (p) => {
     const done = [];
-    if (ids.includes('depth')) {
-      const order = [...p.layers.filter((l) => l.plane === 'background'), ...p.layers.filter((l) => l.plane !== 'background')].filter((l) => !/^Duo /.test(l.name));
+    p.fxApplied ||= {};
+    const remember = (fx, l, keys) => {
+      const rec = (p.fxApplied[fx] ||= {});
+      if (!rec[l.id]) rec[l.id] = JSON.parse(JSON.stringify(Object.fromEntries(keys.map((k) => [k, l[k]]))));
+    };
+    // ---- removals
+    for (const fx of have) {
+      if (want.has(fx)) continue;
+      p.layers = p.layers.filter((l) => l.fx !== fx);
+      for (const [id, prev] of Object.entries(p.fxApplied[fx] || {})) {
+        const l = p.layers.find((x) => x.id === id);
+        if (l) Object.assign(l, prev);
+      }
+      delete p.fxApplied[fx];
+      done.push(`− ${EFFECTS.find((e) => e.id === fx)?.name || fx}`);
+    }
+    const plain = () => p.layers.filter((l) => !l.fx);
+    // ---- additions
+    if (want.has('depth') && !have.has('depth')) {
+      const order = [...plain().filter((l) => l.plane === 'background'), ...plain().filter((l) => l.plane !== 'background')];
       order.forEach((l, i) => {
+        remember('depth', l, ['parallax', 'w', 'h']);
         if (!l.parallax) l.parallax = Math.round(4 + (order.length > 1 ? (20 * i) / (order.length - 1) : 0));
         const bleed = 1 + (2 * l.parallax) / Math.min(p._w, p._h);
         if (Math.abs(l.w - p._w) < 2 && Math.abs(l.h - p._h) < 2) {
@@ -161,37 +234,64 @@ export async function prepareEffects(project, ids, opts = {}) {
           l.h = Math.round(p._h * bleed);
         }
       });
-      done.push('depth');
+      p.fxApplied.depth ||= {};
+      done.push('+ depth');
     }
-    if (ids.includes('unlockZoom')) {
-      for (const l of p.layers.filter((x) => x.plane === 'background' && !/^Duo /.test(x.name))) l.states.Unlock = { scale: 1.08, ...(l.states.Unlock || {}) };
-      done.push('unlock zoom');
+    if (want.has('unlockZoom') && !have.has('unlockZoom')) {
+      for (const l of plain().filter((x) => x.plane === 'background')) {
+        remember('unlockZoom', l, ['states']);
+        l.states.Unlock = { scale: 1.08, ...(l.states.Unlock || {}) };
+      }
+      p.fxApplied.unlockZoom ||= {};
+      done.push('+ unlock zoom');
     }
-    if (ids.includes('aodDim')) {
-      for (const l of p.layers) l.states.Sleep = { opacity: Math.min(l.opacity, 0.55), ...(l.states.Sleep || {}) };
-      done.push('AOD dim');
+    if (want.has('aodDim') && !have.has('aodDim')) {
+      for (const l of plain()) {
+        remember('aodDim', l, ['states']);
+        l.states.Sleep = { opacity: Math.min(l.opacity, 0.55), ...(l.states.Sleep || {}) };
+      }
+      p.fxApplied.aodDim ||= {};
+      done.push('+ AOD dim');
     }
-    if (add.length) {
-      // fold panels sit on top of the other "behind the clock" layers
+    if (added.duotilt) {
+      // the flattened picture replaces the originals visually: hide them (restored on removal)
+      for (const l of plain()) {
+        remember('duotilt', l, ['hidden']);
+        l.hidden = true;
+      }
+      p.layers.unshift(...added.duotilt);
+      done.push('+ Duo 3D tilt');
+    }
+    if (added.duo) {
       const lastBg = p.layers.map((l) => l.plane).lastIndexOf('background');
-      p.layers.splice(lastBg + 1, 0, ...add);
+      p.layers.splice(lastBg + 1, 0, ...added.duo);
+      done.push('+ Duo fold');
+    }
+    if (added.duo || added.duotilt) {
       if (p.format === 'classic') p.format = 'modern';
       p.perspective = Math.min(p.perspective || 900, 700);
-      done.push('Duo fold');
     }
-    if (ids.includes('vignette')) {
-      p.layers.push(newLayer('gradient', p, { name: 'Vignette', plane: 'floating', gradient: { type: 'radial', angle: 0, stops: [{ c: '#00000000', p: 0.55 }, { c: '#000000b3', p: 1 }] } }));
-      done.push('vignette');
+    if (want.has('vignette') && !have.has('vignette')) {
+      p.layers.push(Object.assign(newLayer('gradient', p, { name: 'Vignette', plane: 'floating', gradient: { type: 'radial', angle: 0, stops: [{ c: '#00000000', p: 0.55 }, { c: '#000000b3', p: 1 }] } }), { fx: 'vignette' }));
+      done.push('+ vignette');
     }
-    if (ids.includes('glass')) {
-      p.layers.push(newLayer('glass', p, { name: 'Glass card', y: p._h * 0.78, h: 150, cornerRadius: 40, glass: { mode: 'liquid', blur: 3, tint: '#ffffff', tintOpacity: 0.08, border: 0.6, saturation: 1.6, shine: 0.4, refraction: 90 }, parallax: 14, states: { Unlock: { opacity: 0, y: p._h * 0.9 }, Sleep: { opacity: 0 } } }));
-      done.push('glass');
+    if (want.has('glass') && !have.has('glass')) {
+      p.layers.push(Object.assign(newLayer('glass', p, { name: 'Glass card', y: p._h * 0.78, h: 150, cornerRadius: 40, glass: { mode: 'liquid', blur: 3, tint: '#ffffff', tintOpacity: 0.08, border: 0.6, saturation: 1.6, shine: 0.4, refraction: 90 }, parallax: 14, states: { Unlock: { opacity: 0, y: p._h * 0.9 }, Sleep: { opacity: 0 } } }), { fx: 'glass' }));
+      done.push('+ glass');
     }
     for (const k of PARTICLES) {
-      if (!ids.includes(`fx-${k}`)) continue;
-      p.layers.push(newLayer('emitter', p, { id: uid('L'), name: EMITTER_PRESETS[k].name, plane: 'floating', emitter: { preset: k, ...EMITTER_PRESETS[k] }, states: { Sleep: { opacity: 0 } } }));
-      done.push(EMITTER_PRESETS[k].name.toLowerCase());
+      const fx = `fx-${k}`;
+      if (!want.has(fx) || have.has(fx)) continue;
+      p.layers.push(Object.assign(newLayer('emitter', p, { id: uid('L'), name: EMITTER_PRESETS[k].name, plane: 'floating', emitter: { preset: k, ...EMITTER_PRESETS[k] }, states: { Sleep: { opacity: 0 } } }), { fx }));
+      done.push(`+ ${EMITTER_PRESETS[k].name.toLowerCase()}`);
     }
     return done;
   };
+}
+
+/** effect ids currently applied to a project */
+export function appliedEffects(project) {
+  const ids = new Set(project.layers.map((l) => l.fx).filter(Boolean));
+  for (const k of Object.keys(project.fxApplied || {})) ids.add(k);
+  return [...ids];
 }

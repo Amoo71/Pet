@@ -651,7 +651,7 @@ function applyGyro(l, n, p) {
     if (g.fade.startsWith('-')) u = 1 - u;
     const lo = g.fadeMin ?? 0;
     const hi = g.fadeMax ?? 1;
-    first.style.opacity = String(lo + (hi - lo) * u);
+    first.style.opacity = String(Math.max(0, Math.min(1, lo + (hi - lo) * u)));
   } else first.style.opacity = '';
 }
 
