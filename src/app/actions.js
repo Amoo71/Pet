@@ -457,7 +457,7 @@ export async function openBrowse(initial = 'apple') {
       const bytes = await cat.downloadTendies(w.url, (got, total) => pm.set(got, total, `${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`), pm.signal);
       pm.close();
       const rm = await import('../core/rawmorph.js');
-      if (morph && (await rm.prefersRawMorph(bytes))) return rawMorphFlow([{ name: w.name, bytes }]);
+      if (morph && (await needsRawMorph(rm, bytes))) return rawMorphFlow([{ name: w.name, bytes }]);
       const file = new File([bytes], `${w.name}.tendies`);
       const projects = await importTendiesFile(file);
       if (morph && projects?.length) await openEffects();
@@ -515,6 +515,17 @@ export async function openEffects() {
 }
 
 /** Morph mode: import one or more .tendies, add effects to each, save them to the library. */
+/** morph in place (keep the original) when the editor can't represent everything in the file */
+async function needsRawMorph(rm, bytes) {
+  if (await rm.prefersRawMorph(bytes)) return true;
+  try {
+    const { projects } = await importTendies(bytes, async () => 'probe');
+    return projects.some((p) => p.importLossy);
+  } catch {
+    return false;
+  }
+}
+
 export async function morphTendies() {
   const files = await pickFiles('.tendies,.zip,application/zip,application/octet-stream', true);
   if (!files.length) return;
@@ -526,7 +537,7 @@ export async function morphTendies() {
     const name = f.name.replace(/\.(tendies|zip)$/i, '');
     let r = false;
     try {
-      r = await rm.prefersRawMorph(bytes);
+      r = await needsRawMorph(rm, bytes);
     } catch {
       /* not a zip – let the importer report it */
     }
@@ -617,6 +628,7 @@ export async function rawMorphFlow(list) {
   const EFFECTS = mod.EFFECTS.filter((f) => rm.RAW_CAPABLE(f.id));
   const state = { mod: { ...mod, EFFECTS }, ids: new Set() };
   const tune = JSON.parse(JSON.stringify(rm.TUNE_DEFAULTS));
+  let rawName = usable.length === 1 ? `${usable[0].name} ✦` : '';
   const POS = [['top', 'Top'], ['topLeft', 'Top left'], ['topRight', 'Top right'], ['center', 'Center'], ['bottom', 'Bottom']];
   const BLENDS = [['screenBlendMode', 'Screen (glow)'], ['softLightBlendMode', 'Soft light'], ['overlayBlendMode', 'Overlay'], ['lightenBlendMode', 'Lighten'], ['colorDodgeBlendMode', 'Color dodge']];
   // 🔧 edit the original: every value the file exposes (single file)
@@ -626,6 +638,7 @@ export async function rawMorphFlow(list) {
   const go = await new Promise((resolve) =>
     modal(`✨ Morph ${usable.length > 1 ? `${usable.length} wallpapers` : `“${usable[0].name}”`}`, [
       el('p', { class: 'muted' }, 'Stays original – only what you change is written.'),
+      usable.length === 1 ? fileNameField(() => rawName, (v) => (rawName = v)) : null,
       original,
       el('h4', {}, '🎛 Re-program'),
       el('div', { class: 'form' }, [
@@ -667,7 +680,7 @@ export async function rawMorphFlow(list) {
       out.push({ name: usable[i].name, ...r });
     }
     pm.close();
-    for (const o of out) await shareOrDownload(o.zip, `${safeName(o.name)} ✦.tendies`);
+    for (const o of out) await shareOrDownload(o.zip, `${fileSafe((out.length === 1 && rawName.trim()) || `${o.name} ✦`)}.tendies`);
     const n = out.reduce((a, o) => a + o.wallpapers, 0);
     toast(`${n} wallpaper${n > 1 ? 's' : ''} re-programmed – install the ✦ file with Placard.`, 'ok', 6000);
     store.lastRawMorph = out.map((o) => ({ name: o.name, size: o.zip.length, wallpapers: o.wallpapers, changed: o.changed }));
@@ -908,7 +921,7 @@ function confirmIssues(issues) {
 export function openExport() {
   const p = store.project;
   const issues = validateProject(p);
-  const opts = { format: p.format || 'modern', scale: 3 };
+  const opts = { format: p.format || 'modern', scale: 3, fileName: p.exportName || p.name || 'Wallpaper' };
   const mem = el('p', { class: 'muted' });
   const refreshMem = () => (mem.textContent = `Estimated decoded memory ≈ ${Math.round(memoryEstimate(p) * (opts.scale / 3) ** 2)} MB`);
   refreshMem();
@@ -918,7 +931,7 @@ export function openExport() {
       formatCard('duo', 'Duo', 'only iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Won’t appear on regular iPhones'], opts),
       formatCard('classic', 'Classic', 'iOS 17 – 26', ['Spring animation after unlock', 'Light / Dark variants', 'Most compatible with older tools'], opts),
     ]),
-    el('p', { class: 'muted' }, 'Placard tip: Classic uses exactly the structure of community wallpapers verified on iOS 27.2 – if a Modern wallpaper doesn’t show up in Collections, export Classic. After installing, respring (Placard → refresh) and look under + → Collections.'),
+    fileNameField(() => opts.fileName, (v) => (opts.fileName = v)),
     selectField('Quality', [[3, 'Best (@3x)'], [2, 'Performance (@2x, smaller)']], () => opts.scale, (v) => ((opts.scale = Number(v)), refreshMem())),
     mem,
     issues.length ? el('ul', { class: 'issues' }, issues.map((i) => el('li', { class: `issue-${i.level}` }, i.msg))) : el('p', { class: 'ok-note' }, '✓ Ready to export'),
@@ -927,6 +940,17 @@ export function openExport() {
     ['Nugget template (.batter)', (c) => (c(), exportBatter(opts))],
     ['Export .tendies', (c) => (c(), exportTendies(opts)), 'primary'],
   ]);
+}
+
+/** a file name as typed – only characters file systems forbid are removed */
+const fileSafe = (s, fallback = 'Wallpaper') => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || fallback;
+
+/** "File name" input with the extension shown after it */
+function fileNameField(get, set, ext = '.tendies') {
+  const input = el('input', { type: 'text', class: 'text', id: 'exportFileName', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'File name' });
+  input.value = get() || '';
+  input.addEventListener('input', () => set(input.value));
+  return el('label', { class: 'field' }, [el('span', { class: 'field-label' }, 'File name'), el('div', { class: 'num-wrap' }, [input, el('span', { class: 'unit' }, ext)])]);
 }
 
 function formatCard(id, title, sub, bullets, opts) {
@@ -956,7 +980,9 @@ export async function exportTendies(o = {}) {
     const zip = await buildTendies(withScale(store.project, o.scale), exportRender);
     pm.set(3, 3, `Done – ${(zip.length / 1024 / 1024).toFixed(2)} MB`);
     pm.close();
-    const r = await shareOrDownload(zip, `${safeName(p.name)}.tendies`);
+    const fileName = (o.fileName || p.name || 'Wallpaper').trim();
+    if (o.fileName && o.fileName !== p.exportName) update((pp) => (pp.exportName = o.fileName), 'exportName');
+    const r = await shareOrDownload(zip, `${fileSafe(fileName)}.tendies`);
     if (r !== 'cancelled') toast('.tendies ready ✓ – install it with Nugget, Pocket Poster, Placard…', 'ok', 5000);
   } catch (e) {
     console.error(e);
@@ -971,7 +997,7 @@ export async function exportBatter(o = {}) {
   if (!p.layers.some((l) => l.nuggetOption)) toast('Tip: mark layers as “Customizable in Nugget” (Style tab), otherwise the template has no options.', 'info', 6000);
   try {
     const zip = await buildBatter(withScale(p, o.scale), exportRender, { title: p.name });
-    await shareOrDownload(zip, `${safeName(p.name)}.batter`);
+    await shareOrDownload(zip, `${fileSafe(o.fileName || p.name)}.batter`);
   } catch (e) {
     toast(`Export failed: ${e.message}`, 'error');
   }

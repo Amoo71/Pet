@@ -34,6 +34,77 @@ function parseTransform(s) {
   return out;
 }
 
+// ---------------------------------------------------------------- animations
+
+const ANIM_KEYS = new Set(['position', 'position.x', 'position.y', 'transform.translation.x', 'transform.translation.y', 'transform.rotation.z', 'transform.rotation', 'transform.scale', 'transform.scale.xy', 'opacity']);
+const valOf = (n) => {
+  if (!n) return null;
+  const v = n.getAttribute('value');
+  if (n.tagName === 'CGPoint' || /\s/.test(v || '')) return nums(v);
+  return Number(v);
+};
+
+/**
+ * CAML animations on one element (link of the layer chain) → editor animations
+ * (offsets / multipliers relative to the element, in screen space).
+ */
+function readAnimations(link) {
+  const out = [];
+  for (const a of link.el.querySelectorAll(':scope > animations > *')) {
+    const kp = a.getAttribute('keyPath') || '';
+    const type = a.getAttribute('type') || '';
+    if (!ANIM_KEYS.has(kp) || /Spring/.test(type)) continue;
+    let values = [];
+    let keyTimes = [];
+    if (/Keyframe/.test(type)) {
+      values = [...a.querySelectorAll(':scope > values > *')].map(valOf);
+      keyTimes = [...a.querySelectorAll(':scope > keyTimes > *')].map((n) => Number(n.getAttribute('value')));
+    } else {
+      const from = a.querySelector(':scope > fromValue');
+      const to = a.querySelector(':scope > toValue');
+      if (!from || !to) continue;
+      values = [valOf(from), valOf(to)];
+    }
+    values = values.filter((v) => v != null && (Array.isArray(v) ? v.every(Number.isFinite) : Number.isFinite(v)));
+    if (values.length < 2) continue;
+    if (keyTimes.length !== values.length) keyTimes = values.map((_, i) => i / (values.length - 1));
+    const rep = a.getAttribute('repeatCount');
+    const timing = {
+      duration: Number(a.getAttribute('duration')) || 1,
+      autoreverse: a.getAttribute('autoreverses') === '1',
+      repeat: rep === 'inf' || Number(rep) > 1e6 || a.getAttribute('repeatDuration') === 'inf' ? 'loop' : 'once',
+      easing: a.getAttribute('timingFunction') || 'linear',
+      delay: Math.max(0, Number(a.getAttribute('timeOffset')) || 0),
+    };
+    const make = (prop, vs) => ({ id: uid('A'), preset: 'custom', prop, amount: 0, keys: vs.map((v, i) => ({ t: Math.max(0, Math.min(1, keyTimes[i])), v: Math.round(v * 1000) / 1000 })), ...timing, enabled: true });
+    const m = link.pm || I2;
+    const sd = (dx, dy) => [m[0] * dx + m[2] * dy, -(m[1] * dx + m[3] * dy)];
+    if (kp === 'position' || kp === 'position.x' || kp === 'position.y' || kp.startsWith('transform.translation')) {
+      const own = kp.startsWith('transform.translation');
+      const d = values.map((v) => {
+        let dx = 0, dy = 0;
+        if (kp === 'position') [dx, dy] = [v[0] - (link.px || 0), v[1] - (link.py || 0)];
+        else if (kp === 'position.x') dx = v - (link.px || 0);
+        else if (kp === 'position.y') dy = v - (link.py || 0);
+        else if (kp === 'transform.translation.x') dx = v;
+        else dy = v;
+        if (own) [dx, dy] = [dx * (link.ts || 1), dy * (link.ts || 1)];
+        return sd(dx, dy);
+      });
+      if (d.some(([x]) => Math.abs(x) > 0.01)) out.push(make('x', d.map(([x]) => x)));
+      if (d.some(([, y]) => Math.abs(y) > 0.01)) out.push(make('y', d.map(([, y]) => y)));
+    } else if (kp.startsWith('transform.rotation')) {
+      // CA radians counter-clockwise → editor degrees clockwise, relative to the element's own rotation
+      out.push(make('rotation', values.map((v) => -(v * RAD - (link.tr || 0)))));
+    } else if (kp.startsWith('transform.scale')) {
+      out.push(make('scale', values.map((v) => v / (link.ts || 1))));
+    } else if (kp === 'opacity') {
+      out.push(make('opacity', values.map((v) => v / (link.opAttr > 0 ? link.opAttr : 1))));
+    }
+  }
+  return out;
+}
+
 // 2D affine matrices [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f (CA space, y up)
 const I2 = [1, 0, 0, 1, 0, 0];
 const mm = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
@@ -216,6 +287,22 @@ export async function importTendies(buf, storeAsset) {
               blend: blend || 'normal',
               filters: { blur: Number(blur) || 0, hue: 0, saturate: 1, contrast: 1 },
             });
+            // looping / one-shot animations of this layer and its containers → editable animations
+            const anims = [];
+            for (const c of nextChain) {
+              const got = readAnimations(c);
+              // a container animating several pictures at once (e.g. a group that rotates) can only be
+              // approximated per layer – morphs of such files keep the original instead (raw morph)
+              if (got.length && c.el !== child && c.el.querySelectorAll('contents, CGImage').length > 1 && !proj.importLossy) {
+                proj.importLossy = true;
+                warnings.push('This wallpaper animates whole groups – edits approximate them. To keep it 100 % original, use ✨ Morph instead.');
+              }
+              anims.push(...got);
+            }
+            // moves are applied inside the layer, i.e. in its own (scaled) units
+            const ls = Math.abs(layer.scale || 1) || 1;
+            for (const a of anims) if (a.prop === 'x' || a.prop === 'y') for (const k of a.keys) k.v = Math.round((k.v / ls) * 1000) / 1000;
+            if (anims.length) layer.anims = [...(layer.anims || []), ...anims];
             proj.layers.push(layer);
             layerGeo.set(layer, { pm: space, px: ppx, py: ppy, s0: layer.scale, r0: layer.rotation, ts: tr.sx || 1, tr: tr.rot });
             for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer, opAttr: c.opAttr, pm: c.pm });

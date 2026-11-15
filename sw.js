@@ -1,5 +1,5 @@
 // Offline support: network-first for app files, cached copy as offline fallback.
-const CACHE = 'tendies-studio-2026-11-15.3';
+const CACHE = 'tendies-studio-2026-11-15.4';
 const SHELL = [
   './',
   './index.html',
