@@ -476,3 +476,15 @@ duo-fold.duo-fold { width: 100%; aspect-ratio: auto; height: min(62dvh, 560px); 
 .tilt-val { font-size: 12px; font-weight: 600; color: var(--fg); min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .tilt-wrap .scrub { accent-color: var(--accent); }
 #toasts { top: calc(62px + var(--safe-t)); bottom: auto; }
+
+/* original CAML editor */
+.orig { display: grid; gap: 8px; }
+.orig .section-body { gap: 4px; }
+.orig-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px; gap: 6px; align-items: center; min-height: 36px; }
+.orig-row.three { grid-template-columns: minmax(0, 1fr) 64px 64px 64px; }
+.orig-row.img { grid-template-columns: minmax(0, 1fr) auto; }
+.orig-row .num { width: 100%; flex: none; }
+.orig-row .switch { justify-self: center; }
+.orig-head { min-height: 0; font-size: 11px; color: var(--muted); text-align: center; }
+.orig-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.orig-name small { color: var(--muted); }

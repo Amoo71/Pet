@@ -10,7 +10,7 @@ import { readZip } from '../core/zip.js';
 import { renderParticleCanvas, canvasToBlob, makeCanvas } from '../browser/raster.js';
 import { listProjects, getProject, saveProject } from '../browser/storage.js';
 import { searchGifs, getSearchSettings, setSearchSettings, PROVIDERS } from '../browser/gifsearch.js';
-import { el, pickFiles, toast, modal, progressModal, shareOrDownload, numField, toggleField, selectField, textField, segmented, button, colorField } from './dom.js';
+import { el, pickFiles, toast, modal, progressModal, shareOrDownload, numField, toggleField, selectField, textField, segmented, button, colorField, section } from './dom.js';
 
 export function addLayer(kind, props = {}) {
   const p = store.project;
@@ -619,9 +619,14 @@ export async function rawMorphFlow(list) {
   const tune = JSON.parse(JSON.stringify(rm.TUNE_DEFAULTS));
   const POS = [['top', 'Top'], ['topLeft', 'Top left'], ['topRight', 'Top right'], ['center', 'Center'], ['bottom', 'Bottom']];
   const BLENDS = [['screenBlendMode', 'Screen (glow)'], ['softLightBlendMode', 'Soft light'], ['overlayBlendMode', 'Overlay'], ['lightenBlendMode', 'Lighten'], ['colorDodgeBlendMode', 'Color dodge']];
+  // 🔧 edit the original: every value the file exposes (single file)
+  const edits = {};
+  const newFiles = {};
+  const original = usable.length === 1 ? await originalEditor(rm, usable[0].bytes, edits, newFiles) : null;
   const go = await new Promise((resolve) =>
     modal(`✨ Morph ${usable.length > 1 ? `${usable.length} wallpapers` : `“${usable[0].name}”`}`, [
-      el('p', {}, 'Apple’s own wallpaper stays original (HEIC images, 3D rig, gyro) – you re-program its look and add effects on top.'),
+      el('p', { class: 'muted' }, 'Stays original – only what you change is written.'),
+      original,
       el('h4', {}, '🎛 Re-program'),
       el('div', { class: 'form' }, [
         numField('Brightness', () => tune.brightness, (v) => (tune.brightness = v), { min: -0.4, max: 0.4, step: 0.01, slider: true }),
@@ -647,7 +652,10 @@ export async function rawMorphFlow(list) {
   if (!go) return;
   const ids = [...state.ids].filter(rm.RAW_CAPABLE);
   const d = rm.TUNE_DEFAULTS;
-  const tuned = tune.brightness !== d.brightness || tune.contrast !== d.contrast || tune.saturation !== d.saturation || tune.hue !== d.hue || tune.gyro !== d.gyro || tune.light.intensity > 0;
+  tune.edits = edits;
+  tune.files = newFiles;
+  const edited = Object.values(edits).some((e) => Object.values(e).some((m) => Object.keys(m).length));
+  const tuned = edited || tune.brightness !== d.brightness || tune.contrast !== d.contrast || tune.saturation !== d.saturation || tune.hue !== d.hue || tune.gyro !== d.gyro || tune.light.intensity > 0;
   if (!ids.length && !tuned) return toast('Nothing changed – move a slider or pick an effect.', 'warn');
   const pm = progressModal('Morphing…');
   try {
@@ -668,6 +676,71 @@ export async function rawMorphFlow(list) {
     console.error(e);
     toast(`Morph failed: ${e.message}`, 'error', 6000);
   }
+}
+
+/** "Original" section: gyro, swipe states, layers and images of the wallpaper's own CAML */
+async function originalEditor(rm, bytes, edits, newFiles) {
+  const pk = await rm.openPackage(bytes);
+  if (!pk.docs.length) return null;
+  let cur = 0;
+  const body = el('div', { class: 'orig-body' });
+  const ed = (path) => (edits[path] ||= { parallax: {}, props: {}, layers: {}, images: {} });
+  const numIn = (get, set, step = 0.01) => {
+    const i = el('input', { type: 'number', class: 'num', step, inputmode: 'decimal' });
+    i.value = get() ?? '';
+    i.addEventListener('input', () => i.value !== '' && set(Number(i.value)));
+    return i;
+  };
+  const short = (k = '') => k.replace(/^transform\./, '').replace(/^filters\./, '').replace(/\.inputAmount$/, '');
+  const draw = () => {
+    const doc = pk.docs[cur];
+    const E = ed(doc.path);
+    const gyro = doc.parallax.map((g) =>
+      el('div', { class: 'orig-row' }, [
+        el('span', { class: 'orig-name', title: `${g.layerName} · ${g.keyPath}` }, [g.title || g.layerName, el('small', {}, ` ${short(g.keyPath)} · ${g.axis}`)]),
+        numIn(() => E.parallax[g.i]?.min ?? g.min, (v) => ((E.parallax[g.i] ||= {}).min = v)),
+        numIn(() => E.parallax[g.i]?.max ?? g.max, (v) => ((E.parallax[g.i] ||= {}).max = v)),
+      ])
+    );
+    const props = doc.props.map((g) =>
+      el('div', { class: 'orig-row three' }, [
+        el('span', { class: 'orig-name', title: `${g.layerName} · ${g.keyPath}` }, [g.title || g.layerName, el('small', {}, ` ${short(g.keyPath)}`)]),
+        ...['lock', 'home', 'sleep'].map((k) => numIn(() => E.props[g.i]?.[k] ?? g[k], (v) => ((E.props[g.i] ||= {})[k] = v))),
+      ])
+    );
+    const layers = doc.layers.map((l) => {
+      const sw = el('input', { type: 'checkbox', class: 'switch', title: 'Visible' });
+      sw.checked = !(E.layers[l.i]?.hidden ?? l.hidden);
+      sw.addEventListener('change', () => ((E.layers[l.i] ||= {}).hidden = !sw.checked));
+      return el('div', { class: 'orig-row' }, [el('span', { class: 'orig-name' }, [l.name, el('small', {}, ` ${l.kind.replace(/^CA/, '')}`)]), sw, numIn(() => E.layers[l.i]?.opacity ?? l.opacity, (v) => ((E.layers[l.i] ||= {}).opacity = Math.max(0, Math.min(1, v))), 0.05)]);
+    });
+    const caDir = doc.path.replace(/main\.caml$/i, '');
+    const images = doc.images.map((src) => {
+      const state = el('small', {}, E.images[src] ? ' ✓ replaced' : '');
+      const btn = button('Replace', async () => {
+        const [f] = await pickFiles('image/*');
+        if (!f) return;
+        const img = await createImageBitmap(f);
+        const c = makeCanvas(img.width, img.height);
+        c.getContext('2d').drawImage(img, 0, 0);
+        const to = src.replace(/\.[a-z0-9]+$/i, '') + '-custom.png';
+        newFiles[caDir + to] = new Uint8Array(await (await canvasToBlob(c)).arrayBuffer());
+        E.images[src] = to;
+        state.textContent = ' ✓ replaced';
+      }, 'small');
+      return el('div', { class: 'orig-row img' }, [el('span', { class: 'orig-name' }, [src.split('/').pop(), state]), btn]);
+    });
+    const head = (cols) => el('div', { class: `orig-row orig-head ${cols.length === 3 ? 'three' : ''}` }, [el('span', {}, ''), ...cols.map((c) => el('span', {}, c))]);
+    body.replaceChildren(
+      section(`Gyro (${gyro.length})`, gyro.length ? [head(['min', 'max']), ...gyro] : [el('p', { class: 'muted' }, 'None')], { closed: true }),
+      section(`Swipe & Always-On (${props.length})`, props.length ? [head(['Lock', 'Home', 'AOD']), ...props] : [el('p', { class: 'muted' }, 'None')], { closed: true }),
+      section(`Layers (${layers.length})`, [head(['on', 'opacity']), ...layers], { closed: true }),
+      section(`Images (${images.length})`, images.length ? images : [el('p', { class: 'muted' }, 'None')], { closed: true })
+    );
+  };
+  const pick = pk.docs.length > 1 ? selectField('Wallpaper', pk.docs.map((d, i) => [String(i), d.label]), () => String(cur), (v) => ((cur = Number(v)), draw())) : null;
+  draw();
+  return el('div', { class: 'orig' }, [el('h4', {}, '🔧 Original'), pick, body]);
 }
 
 /** Apple's system-drawn wallpapers: no layers, only the switches iOS itself offers */

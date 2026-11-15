@@ -174,6 +174,9 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await pg.locator('.modal .field:has-text("Light intensity") input.num').fill('0.6');
   await pg.locator('.modal .field:has-text("Saturation") input.num').fill('1.4');
   assert.equal(await pg.locator('.modal .fx[data-fx="duotilt"]').count(), 0, 'raw morph offers overlay effects only');
+  // edit the original: hide one of its layers
+  await pg.click('.orig summary:has-text("Layers")');
+  await pg.locator('.orig .orig-row:has-text("_GYRO") .switch').click();
   const rdl = pg.waitForEvent('download');
   await pg.click('.modal-actions button:has-text("Morph & export")');
   const rfile = path.join(OUT, 'raw-morph.tendies');
@@ -181,6 +184,7 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   const rbuf = fs.readFileSync(rfile);
   assert(rbuf.includes(Buffer.from('morph-snow')) && rbuf.includes(Buffer.from('a.HEIC')), 'raw morph output keeps HEIC and adds snow');
   assert(rbuf.includes(Buffer.from('morph-light')) && rbuf.includes(Buffer.from('Morph Saturate')), 'light + grading');
+  assert(/<CATransformLayer hidden="1" name="_GYRO"|name="_GYRO"[^>]*hidden="1"/.test(rbuf.toString('latin1')), 'original layer hidden');
   // system-drawn Apple wallpaper: look switch
   await pg.evaluate(async () => {
     const { createZip } = await import('/src/core/zip.js');

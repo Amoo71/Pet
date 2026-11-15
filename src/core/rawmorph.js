@@ -189,6 +189,13 @@ export async function rawMorph(input, effects, assets, tune = {}) {
   }
   if (!targets.length) targets.push(info.camls[0]);
   let changed = 0;
+  // edits of the original (from openPackage / describeCaml indices) – any document, not only targets
+  for (const [path, edits] of Object.entries(tune.edits || {})) {
+    if (!files.has(path)) continue;
+    files.set(path, enc.encode(editCaml(dec.decode(files.get(path)), edits)));
+    changed++;
+  }
+  for (const [path, bytes] of Object.entries(tune.files || {})) files.set(path, bytes);
   for (const camlPath of targets) {
     let xml = dec.decode(files.get(camlPath));
     const t = findTarget(xml, true);
@@ -310,4 +317,95 @@ export async function prefersRawMorph(input) {
     for (const m of xml.matchAll(/<CATransformLayer\b[^>]*\sname="([^"]*)"/g)) if (!/ Parallax( 2)?$/.test(m[1])) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------- edit the original CAML
+// Everything a wallpaper file exposes, made editable without rebuilding it:
+// gyro groups, swipe/AOD property groups, every named layer (hidden, opacity) and images.
+
+const DICT_RE = /<NSDictionary>([\s\S]*?)<\/NSDictionary>/g;
+const dval = (d, k) => {
+  const m = new RegExp(`<${k} type="(\\w+)"(?: value="([^"]*)")?\\s*/>`).exec(d);
+  return m ? (m[1] === 'null' ? null : m[1] === 'real' || m[1] === 'integer' ? Number(m[2]) : m[2]) : undefined;
+};
+const section = (xml, name) => new RegExp(`<${name} type="NSArray">([\\s\\S]*?)</${name}>`).exec(xml);
+
+/** a readable summary of a CAML document */
+export function describeCaml(xml) {
+  const dicts = (name) => {
+    const s = section(xml, name);
+    return s ? [...s[1].matchAll(DICT_RE)].map((m) => m[1]) : [];
+  };
+  const parallax = dicts('wallpaperParallaxGroups').map((d, i) => ({ i, title: dval(d, 'title'), layerName: dval(d, 'layerName'), keyPath: dval(d, 'keyPath'), axis: dval(d, 'axis'), min: dval(d, 'mapMinTo'), max: dval(d, 'mapMaxTo') }));
+  const props = dicts('wallpaperPropertyGroups').map((d, i) => ({ i, title: dval(d, 'title'), layerName: dval(d, 'layerName'), keyPath: dval(d, 'keyPath'), lock: dval(d, 'v_lock'), home: dval(d, 'v_home'), sleep: dval(d, 'v_sleep') }));
+  const layers = [];
+  const re = new RegExp(LAYER_TAG.source, 'g');
+  let m;
+  while ((m = re.exec(xml))) {
+    if (m[1] === '/') continue;
+    const name = attr(m[0], 'name');
+    if (!name || / \(morph\)$/.test(name) || /^morph-/.test(attr(m[0], 'id') || '')) continue;
+    layers.push({ i: layers.length, name, kind: m[2], hidden: attr(m[0], 'hidden') === '1', opacity: attr(m[0], 'opacity') == null ? 1 : Number(attr(m[0], 'opacity')) });
+  }
+  const images = [...new Set([...xml.matchAll(/<(?:CGImage|contents)\b[^>]*\ssrc="([^"]+)"/g)].map((x) => x[1]))];
+  return { parallax, props, layers, images };
+}
+
+/** apply edits from describeCaml indices: {parallax:{i:{min,max}}, props:{i:{lock,home,sleep}}, layers:{i:{hidden,opacity}}, images:{oldSrc:newSrc}} */
+export function editCaml(xml, e = {}) {
+  const setVal = (d, k, v) => {
+    if (v == null || Number.isNaN(v)) return d;
+    const re = new RegExp(`<${k} type="(real|integer)" value="[^"]*"\\s*/>`);
+    return re.test(d) ? d.replace(re, `<${k} type="real" value="${num(v)}"/>`) : d;
+  };
+  const editSection = (name, map, keys) => {
+    if (!map || !Object.keys(map).length) return;
+    const s = section(xml, name);
+    if (!s) return;
+    let i = -1;
+    const body = s[1].replace(DICT_RE, (all, d) => {
+      i++;
+      const ed = map[i];
+      if (!ed) return all;
+      let out = d;
+      for (const [field, key] of keys) out = setVal(out, key, ed[field]);
+      return `<NSDictionary>${out}</NSDictionary>`;
+    });
+    xml = xml.slice(0, s.index) + `<${name} type="NSArray">${body}</${name}>` + xml.slice(s.index + s[0].length);
+  };
+  editSection('wallpaperParallaxGroups', e.parallax, [['min', 'mapMinTo'], ['max', 'mapMaxTo']]);
+  editSection('wallpaperPropertyGroups', e.props, [['lock', 'v_lock'], ['home', 'v_home'], ['sleep', 'v_sleep']]);
+  if (e.layers && Object.keys(e.layers).length) {
+    let i = -1;
+    const re = new RegExp(LAYER_TAG.source, 'g');
+    xml = xml.replace(re, (tag, close, kind) => {
+      if (close === '/') return tag;
+      const name = attr(tag, 'name');
+      if (!name || / \(morph\)$/.test(name) || /^morph-/.test(attr(tag, 'id') || '')) return tag;
+      i++;
+      const ed = e.layers[i];
+      if (!ed) return tag;
+      let t = tag;
+      const set = (k, v) => {
+        t = new RegExp(`\\s${k}="[^"]*"`).test(t) ? t.replace(new RegExp(`\\s${k}="[^"]*"`), ` ${k}="${v}"`) : t.replace(new RegExp(`^<${kind}\\b`), `<${kind} ${k}="${v}"`);
+      };
+      if (ed.hidden != null) set('hidden', ed.hidden ? 1 : 0);
+      if (ed.opacity != null) set('opacity', num(ed.opacity));
+      return t;
+    });
+  }
+  for (const [from, to] of Object.entries(e.images || {})) xml = xml.split(`src="${from}"`).join(`src="${to}"`);
+  return xml;
+}
+
+/** the Core Animation documents of a package, with what each exposes */
+export async function openPackage(input) {
+  const files = await readZip(input);
+  const info = inspectPackage(files);
+  const docs = info.camls.map((path) => ({
+    path,
+    label: (path.match(/([^/]+)\.wallpaper\//)?.[1] || path.split('/').slice(-3, -2)[0] || 'Wallpaper').replace(/^\d+\./, '') + (/_Floating/i.test(path) ? ' · floating' : /_Background/i.test(path) ? ' · background' : ''),
+    ...describeCaml(dec.decode(files.get(path))),
+  }));
+  return { systemOnly: info.systemOnly, docs };
 }
