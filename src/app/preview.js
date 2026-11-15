@@ -333,7 +333,9 @@ function startEmitter(l, n) {
         const c = document.createElement('canvas');
         c.width = c.height = 64;
         const x = c.getContext('2d');
-        x.drawImage(img, 0, 0, 64, 64);
+        // same as the export: the particle picture fitted into a 64 px square (aspect kept)
+        const k = 64 / Math.max(img.width || 64, img.height || 64);
+        x.drawImage(img, (64 - img.width * k) / 2, (64 - img.height * k) / 2, img.width * k, img.height * k);
         if (!cfg.emitter.particleAsset) {
           x.globalCompositeOperation = 'source-in';
           x.fillStyle = cfg.emitter.color || '#fff';
