@@ -147,6 +147,27 @@ export const TEMPLATES = [
     },
   },
   {
+    id: 'gyrotest',
+    icon: '🧭',
+    name: 'Gyro test',
+    desc: 'Install it and compare with ▶ Play: dot, 3D card, swipe bar, snow.',
+    build(p) {
+      p.name = 'Gyro test';
+      const W = p._w, H = p._h;
+      p.layers.push(
+        newLayer('gradient', p, { name: 'Test sky', gradient: grad(180, ['#1b2440', 0], ['#3b2a5a', 1]), w: W + 40, h: H + 40 }),
+        // a dot that moves with the gyro: tilt right → it should move right, tilt forward → down (like ▶ Play)
+        newLayer('shape', p, { name: 'Test dot', w: 70, h: 70, x: W / 2, y: H * 0.55, shape: { type: 'ellipse', fill: '#ff4d6d', stroke: '#fff', strokeWidth: 4, points: 5, blur: 0 }, parallax: 70 }),
+        newLayer('text', p, { name: 'Test label', x: W / 2, y: H * 0.55 + 70, w: W - 40, h: 40, text: { ...newLayer('text', p).text, content: 'dot = gyro · card = 3D tilt · bar = swipe', size: 16, weight: 600 } }),
+        // a card that tilts in 3D with the gyro
+        newLayer('shape', p, { name: 'Test card', w: W * 0.5, h: 120, x: W / 2, y: H * 0.78, shape: { type: 'rect', fill: '#4dd0ff', stroke: '#fff', strokeWidth: 4, points: 4, blur: 0 }, cornerRadius: 22, gyro: { tilt: 30, tiltV: 15, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 } }),
+        // a bar that rises when you swipe up
+        newLayer('shape', p, { name: 'Test bar', w: W * 0.7, h: 16, x: W / 2, y: H * 0.92, shape: { type: 'rect', fill: '#ffd166', stroke: '#fff', strokeWidth: 0, points: 4, blur: 0 }, cornerRadius: 8, states: { Unlock: { y: H * 0.4 }, Sleep: { opacity: 0.3 } } }),
+        newLayer('emitter', p, { name: 'Test snow', plane: 'floating', emitter: { preset: 'snow', ...EMITTER_PRESETS.snow } })
+      );
+    },
+  },
+  {
     id: 'blank',
     icon: '＋',
     name: 'Blank',

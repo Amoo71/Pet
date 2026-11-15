@@ -495,6 +495,8 @@ function projectPanel() {
         duo: 'iPhone Duo · cover + inner screen',
         classic: 'iOS 17+ · spring states · no gyro on iOS 27',
       }[p.format || 'modern']),
+      modern ? toggleField('Gyro on device: flip left/right', () => !!store.project.gyroFlip?.x, (v) => P((pp) => (pp.gyroFlip = { ...(pp.gyroFlip || {}), x: v }))) : null,
+      modern ? toggleField('Gyro on device: flip up/down', () => !!store.project.gyroFlip?.y, (v) => P((pp) => (pp.gyroFlip = { ...(pp.gyroFlip || {}), y: v }))) : null,
       modern ? numField('3D perspective (0 = flat, Apple style)', () => store.project.perspective ?? 900, (v) => P((pp) => (pp.perspective = v < 100 ? 0 : v), 'persp'), { min: 0, max: 3000, step: 10, slider: true, unit: 'pt' }) : null,
       !modern ? toggleField('Light / Dark variants', () => store.project.appearanceAware, (v) => P((pp) => (pp.appearanceAware = v)), 'Adds Locked/Unlock/Sleep Light & Dark states') : null,
     ]),

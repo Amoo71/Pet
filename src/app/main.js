@@ -322,6 +322,29 @@ async function handleFile(f) {
   if (f.type.startsWith('video/')) return toast('Add videos via ＋ Add → Video (frame settings).', 'info');
 }
 
+// ---------------------------------------------------------------- clean start
+
+const APP_VERSION = '2026-11-15.3';
+/** every start: drop unused stored pictures; on a new version also wipe old caches */
+async function cleanOnStart() {
+  try {
+    let last = null;
+    try {
+      last = localStorage.getItem('tendies.version');
+      localStorage.setItem('tendies.version', APP_VERSION);
+    } catch {
+      /* private mode */
+    }
+    if (last !== APP_VERSION && 'caches' in window) {
+      for (const k of await caches.keys()) if (!k.endsWith(APP_VERSION)) await caches.delete(k);
+      if (last) toast('Updated – old caches cleared', 'ok');
+    }
+    collectGarbage();
+  } catch (e) {
+    console.warn('clean start', e);
+  }
+}
+
 // ---------------------------------------------------------------- boot
 
 async function boot() {
@@ -337,7 +360,17 @@ async function boot() {
   requestPersistence();
   window.addEventListener('pagehide', () => flushSave());
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flushSave());
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
+    // a new version took over → reload once so no old code keeps running
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return;
+      reloaded = true;
+      flushSave().finally(() => location.reload());
+    });
+  }
+  cleanOnStart();
   window.__studio = { store, A };
 }
 
