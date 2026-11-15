@@ -169,7 +169,10 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
     const a = await import('/src/app/actions.js');
     a.rawMorphFlow([{ name: 'Marble', bytes }]);
   });
-  await pg.waitForSelector('.modal .fx[data-fx="fx-snow"].on');
+  await pg.waitForSelector('.modal .fx[data-fx="fx-snow"]');
+  await pg.click('.modal .fx[data-fx="fx-snow"]');
+  await pg.locator('.modal .field:has-text("Light intensity") input.num').fill('0.6');
+  await pg.locator('.modal .field:has-text("Saturation") input.num').fill('1.4');
   assert.equal(await pg.locator('.modal .fx[data-fx="duotilt"]').count(), 0, 'raw morph offers overlay effects only');
   const rdl = pg.waitForEvent('download');
   await pg.click('.modal-actions button:has-text("Morph & export")');
@@ -177,6 +180,24 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   await (await rdl).saveAs(rfile);
   const rbuf = fs.readFileSync(rfile);
   assert(rbuf.includes(Buffer.from('morph-snow')) && rbuf.includes(Buffer.from('a.HEIC')), 'raw morph output keeps HEIC and adds snow');
+  assert(rbuf.includes(Buffer.from('morph-light')) && rbuf.includes(Buffer.from('Morph Saturate')), 'light + grading');
+  // system-drawn Apple wallpaper: look switch
+  await pg.evaluate(async () => {
+    const { createZip } = await import('/src/core/zip.js');
+    const { toBinaryPlist } = await import('/src/core/bplist.js');
+    const d = 'Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/X/';
+    const bytes = createZip([
+      { path: d + 'com.apple.posterkit.provider.descriptor.identifier', data: new TextEncoder().encode('X') },
+      { path: d + 'versions/0/contents/com.apple.posterkit.provider.contents.userInfo', data: toBinaryPlist({ appearanceMode: 'Automatic', lookIdentifier: 'colorA' }) },
+    ]);
+    (await import('/src/app/actions.js')).rawMorphFlow([{ name: 'Mercury', bytes }]);
+  });
+  await pg.click('.modal .seg-btn[data-v="colorC"]');
+  const sdl = pg.waitForEvent('download');
+  await pg.click('.modal-actions button:has-text("Export")');
+  const sfile = path.join(OUT, 'system.tendies');
+  await (await sdl).saveAs(sfile);
+  assert(fs.readFileSync(sfile).includes(Buffer.from('colorC')), 'look switched');
 
   assert.deepEqual(errors, []);
   console.log('E2E OK →', OUT);

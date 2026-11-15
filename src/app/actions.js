@@ -10,7 +10,7 @@ import { readZip } from '../core/zip.js';
 import { renderParticleCanvas, canvasToBlob, makeCanvas } from '../browser/raster.js';
 import { listProjects, getProject, saveProject } from '../browser/storage.js';
 import { searchGifs, getSearchSettings, setSearchSettings, PROVIDERS } from '../browser/gifsearch.js';
-import { el, pickFiles, toast, modal, progressModal, shareOrDownload, numField, toggleField, selectField, textField, segmented, button } from './dom.js';
+import { el, pickFiles, toast, modal, progressModal, shareOrDownload, numField, toggleField, selectField, textField, segmented, button, colorField } from './dom.js';
 
 export function addLayer(kind, props = {}) {
   const p = store.project;
@@ -579,6 +579,16 @@ async function morphEditable(list) {
 
 /** PNG bytes for the raw-morph overlay assets */
 const rawAssets = () => ({
+  light: async (hex) => {
+    const c = makeCanvas(512, 512);
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(256, 256, 0, 256, 256, 256);
+    const [r, gg, b] = [1, 3, 5].map((i) => parseInt((hex || '#ffffff').slice(i, i + 2), 16) || 255);
+    for (let i = 0; i <= 8; i++) g.addColorStop(i / 8, `rgba(${r},${gg},${b},${Math.pow(1 - i / 8, 2).toFixed(3)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 512, 512);
+    return new Uint8Array(await (await canvasToBlob(c)).arrayBuffer());
+  },
   particle: async (kind) => new Uint8Array(await (await canvasToBlob(renderParticleCanvas(kind))).arrayBuffer()),
   vignette: async () => {
     const c = makeCanvas(402, 874);
@@ -600,54 +610,97 @@ const rawAssets = () => ({
 export async function rawMorphFlow(list) {
   const rm = await import('../core/rawmorph.js');
   const mod = await import('./effects.js');
-  // system-rendered wallpapers can't be extended – say so and offer the image route
   const usable = [];
   const system = [];
   for (const it of list) (rm.inspectPackage(await readZip(it.bytes)).systemOnly ? system : usable).push(it);
-  if (system.length) {
-    const names = system.map((x) => `“${x.name}”`).join(', ');
-    await new Promise((resolve) =>
-      modal('Built-in iOS wallpaper', [
-        el('p', {}, `${names} ${system.length > 1 ? 'are' : 'is'} drawn by iOS itself (Apple’s newest wallpapers, e.g. for iPhone 17e / 18 Pro, ship only a pointer to the system wallpaper – no images or layers). There is nothing inside to add effects to.`),
-        el('p', { class: 'muted' }, 'Tip: save the wallpaper as an image (screenshot of the Lock Screen without clock, or Apple’s press image) and use it with 3D photo or + Effects – that gives you Duo tilt, snow and everything else.'),
-      ], [
-        ['OK', (c) => (c(), resolve())],
-        ['Use an image instead', (c) => (c(), resolve(), createProject('blank'), add3DPhoto()), 'primary'],
-      ])
-    );
-  }
+  if (system.length) await systemTuneFlow(system, rm);
   if (!usable.length) return;
   const EFFECTS = mod.EFFECTS.filter((f) => rm.RAW_CAPABLE(f.id));
-  const state = { mod: { ...mod, EFFECTS }, ids: new Set(['fx-snow']) };
+  const state = { mod: { ...mod, EFFECTS }, ids: new Set() };
+  const tune = JSON.parse(JSON.stringify(rm.TUNE_DEFAULTS));
+  const POS = [['top', 'Top'], ['topLeft', 'Top left'], ['topRight', 'Top right'], ['center', 'Center'], ['bottom', 'Bottom']];
+  const BLENDS = [['screenBlendMode', 'Screen (glow)'], ['softLightBlendMode', 'Soft light'], ['overlayBlendMode', 'Overlay'], ['lightenBlendMode', 'Lighten'], ['colorDodgeBlendMode', 'Color dodge']];
   const go = await new Promise((resolve) =>
     modal(`✨ Morph ${usable.length > 1 ? `${usable.length} wallpapers` : `“${usable[0].name}”`}`, [
-      el('p', {}, 'This is one of Apple’s own wallpapers (or uses Apple’s 3D rig). It is kept 100 % original – its HEIC images, 3D layers and gyro stay untouched – and the effects are layered on top.'),
+      el('p', {}, 'Apple’s own wallpaper stays original (HEIC images, 3D rig, gyro) – you re-program its look and add effects on top.'),
+      el('h4', {}, '🎛 Re-program'),
+      el('div', { class: 'form' }, [
+        numField('Brightness', () => tune.brightness, (v) => (tune.brightness = v), { min: -0.4, max: 0.4, step: 0.01, slider: true }),
+        numField('Contrast', () => tune.contrast, (v) => (tune.contrast = v), { min: 0.5, max: 1.8, step: 0.01, slider: true }),
+        numField('Saturation', () => tune.saturation, (v) => (tune.saturation = v), { min: 0, max: 2, step: 0.01, slider: true }),
+        numField('Hue shift', () => tune.hue, (v) => (tune.hue = v), { min: -180, max: 180, step: 1, slider: true, unit: '°' }),
+        numField('3D tilt strength', () => tune.gyro, (v) => (tune.gyro = v), { min: 0, max: 3, step: 0.05, slider: true, unit: '×' }),
+      ]),
+      el('h4', {}, '💡 Lighting'),
+      el('div', { class: 'form' }, [
+        numField('Light intensity', () => tune.light.intensity, (v) => (tune.light.intensity = v), { min: 0, max: 1, step: 0.01, slider: true }),
+        colorField('Light color', () => tune.light.color, (v) => (tune.light.color = v)),
+        selectField('Light from', POS, () => tune.light.pos, (v) => (tune.light.pos = v)),
+        selectField('Light blend', BLENDS, () => tune.light.blend, (v) => (tune.light.blend = v)),
+        numField('Size', () => tune.light.size, (v) => (tune.light.size = v), { min: 0.3, max: 1.6, step: 0.05, slider: true, unit: '×' }),
+        numField('Moves with gyro', () => tune.light.follow, (v) => (tune.light.follow = v), { min: 0, max: 150, step: 1, slider: true, unit: 'pt' }),
+      ]),
+      el('h4', {}, '➕ Effects'),
       ...effectsForm(state).slice(1, 2),
-      el('p', { class: 'muted' }, 'Duo tilt / fold need editable layers, so they are offered for your own and community wallpapers. Apple’s marble wallpapers already tilt with the gyro.'),
+      el('p', { class: 'muted' }, 'Tip: colour + light are the same filters Apple uses inside these wallpapers (colorBrightness / colorSaturate on the wallpaper layers). The preview can’t show Apple’s HEIC images in every browser – check the result on the iPhone.'),
     ], [['Cancel', (c) => (c(), resolve(false))], ['Morph & export', (c) => (c(), resolve(true)), 'primary']])
   );
   if (!go) return;
   const ids = [...state.ids].filter(rm.RAW_CAPABLE);
-  if (!ids.length) return toast('Pick at least one effect.', 'warn');
+  const d = rm.TUNE_DEFAULTS;
+  const tuned = tune.brightness !== d.brightness || tune.contrast !== d.contrast || tune.saturation !== d.saturation || tune.hue !== d.hue || tune.gyro !== d.gyro || tune.light.intensity > 0;
+  if (!ids.length && !tuned) return toast('Nothing changed – move a slider or pick an effect.', 'warn');
   const pm = progressModal('Morphing…');
   try {
     const assets = rawAssets();
     const out = [];
     for (let i = 0; i < usable.length; i++) {
       pm.set(i, usable.length, usable[i].name);
-      const r = await rm.rawMorph(usable[i].bytes, ids, assets);
+      const r = await rm.rawMorph(usable[i].bytes, ids, assets, tune);
       out.push({ name: usable[i].name, ...r });
     }
     pm.close();
     for (const o of out) await shareOrDownload(o.zip, `${safeName(o.name)} ✦.tendies`);
     const n = out.reduce((a, o) => a + o.wallpapers, 0);
-    toast(`Added ${ids.length} effect${ids.length > 1 ? 's' : ''} to ${n} wallpaper${n > 1 ? 's' : ''} – install the ✦ file with Placard.`, 'ok', 6000);
+    toast(`${n} wallpaper${n > 1 ? 's' : ''} re-programmed – install the ✦ file with Placard.`, 'ok', 6000);
     store.lastRawMorph = out.map((o) => ({ name: o.name, size: o.zip.length, wallpapers: o.wallpapers, changed: o.changed }));
   } catch (e) {
     pm.close();
     console.error(e);
     toast(`Morph failed: ${e.message}`, 'error', 6000);
   }
+}
+
+/** Apple's system-drawn wallpapers: no layers, only the switches iOS itself offers */
+async function systemTuneFlow(list, rm) {
+  const o = { look: '', appearance: '', motion: true };
+  const names = list.map((x) => `“${x.name}”`).join(', ');
+  const looks = segmented([['', 'Keep'], ...rm.SYSTEM_LOOKS.map((l) => [l, l.replace('color', 'Color ')])], () => o.look, (v) => {
+    o.look = v;
+    looks.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  });
+  const choice = await new Promise((resolve) =>
+    modal('Built-in iOS wallpaper', [
+      el('p', {}, `${names} ${list.length > 1 ? 'are' : 'is'} drawn by iOS itself (Apple’s newest wallpapers, e.g. iPhone 17e / 18 Pro). The file holds no images or code – only the switches below, which iOS reads.`),
+      el('div', { class: 'form' }, [
+        el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Look (colour variant)'), looks]),
+        selectField('Appearance', [['', 'Keep'], ['Automatic', 'Automatic'], ['Light', 'Light (experimental)'], ['Dark', 'Dark (experimental)']], () => o.appearance, (v) => (o.appearance = v)),
+        toggleField('Motion (gyro)', () => o.motion, (v) => (o.motion = v)),
+      ]),
+      el('p', { class: 'muted' }, 'For custom lighting, snow or Duo tilt: save it as an image (Lock Screen screenshot without clock) and use “Use an image instead”.'),
+    ], [
+      ['Cancel', (c) => (c(), resolve(null))],
+      ['Use an image instead', (c) => (c(), resolve('image')), ''],
+      ['Export', (c) => (c(), resolve('export')), 'primary'],
+    ])
+  );
+  if (choice === 'image') return createProject('blank'), add3DPhoto();
+  if (choice !== 'export') return;
+  for (const it of list) {
+    const r = await rm.tuneSystem(it.bytes, { look: o.look || undefined, appearance: o.appearance || undefined, motion: o.motion });
+    await shareOrDownload(r.zip, `${safeName(it.name)} ✦.tendies`);
+  }
+  toast('Exported – install the ✦ file with Placard.', 'ok', 5000);
 }
 
 // ---------------------------------------------------------------- 3D photo (depth layers + gyro)
