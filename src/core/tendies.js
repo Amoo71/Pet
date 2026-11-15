@@ -27,7 +27,13 @@ import { getDevice, screenClass } from './devices.js';
 import { PCA_FILES, PCA_WALLPAPER_DIR } from './template-data.js';
 
 const enc = new TextEncoder();
-const PRODUCT_TYPES = ['iPhone18,3', 'iPhone19,4', 'iPhone18,4'];
+// productTypes may restrict which devices list the wallpaper in the gallery. Apple's template and
+// tendies_kit only name a few (iPhone Duo / Air); list every iPhone model id so no device is filtered out.
+const PRODUCT_TYPES = (() => {
+  const out = ['iPhone18,3', 'iPhone19,4', 'iPhone18,4'];
+  for (let major = 10; major <= 20; major++) for (let minor = 1; minor <= 8; minor++) out.push(`iPhone${major},${minor}`);
+  return [...new Set(out)];
+})();
 
 export function uuid() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID().toUpperCase();
@@ -222,25 +228,37 @@ function providerInfoPlist() {
 }
 
 export async function buildClassicDescriptor(project, render, opts = {}) {
-  const device = getDevice(project.device);
-  const cls = screenClass(device);
+  // Same names every device-verified LayeredAnimation wallpaper keeps (CAPlayground exports,
+  // community wallpapers tested on iOS 27.2): PosterBoard resolves the bundle by Apple's naming.
+  const CLS = '390w-844h@3x~iphone';
   const id = opts.wallpaperId ?? 10000 + Math.floor(Math.random() * 89999);
-  const name = safeName(project.name);
   const root = `${opts.root || 'descriptors'}/${opts.uuid || uuid()}`;
-  const wpName = `${id}.${name}-${cls}.wallpaper`;
+  const wpName = `7400.WWDC_2022-${CLS}.wallpaper`;
   const contents = `${root}/versions/1/contents`;
   const wpDir = `${contents}/${wpName}`;
   const files = [];
   const add = (path, bytes) => files.push({ path, data: typeof bytes === 'string' ? enc.encode(bytes) : bytes });
-  add(`${root}/com.apple.posterkit.role.identifier`, 'PRPosterRoleLockScreen');
+  // full PosterKit metadata set (as in verified files), mapped from the template's versions/0 to versions/1
+  for (const [rel, b] of Object.entries(PCA_FILES)) {
+    if (rel.endsWith('renderingConfiguration.plist')) continue;
+    let bytes = b64(b);
+    if (rel.endsWith('suggestionMetadata.plist')) {
+      const meta = parsePlist(bytes, true);
+      const objs = meta.$objects;
+      const gallery = objs[objs[meta.$top.root.v].suggestedGalleryItem.v];
+      objs[gallery.identifier.v] = uuid();
+      objs[gallery.descriptorIdentifier.v] = `${id}.DYNAMIC`;
+      bytes = toBinaryPlist(meta);
+    }
+    add(`${root}/${rel.replace(/^versions\/0\//, 'versions/1/')}`, bytes);
+  }
   add(`${root}/com.apple.posterkit.provider.descriptor.identifier`, String(id));
-  add(`${root}/providerInfo.plist`, providerInfoPlist());
-  add(`${contents}/com.apple.posterkit.provider.contents.userInfo`, toXmlPlist({ posterEnvironmentOverrides: data(enc.encode('{}')), wallpaperRepresentingFileName: wpName, wallpaperRepresentingIdentifier: String(id) }));
+  add(`${contents}/com.apple.posterkit.provider.contents.userInfo`, toBinaryPlist({ wallpaperRepresentingIdentifier: String(id), wallpaperRepresentingFileName: wpName, posterEnvironmentOverrides: data(enc.encode('{}')) }));
   const names = uniqueNames(project.layers);
   const planeFiles = {};
   const caDirs = {};
   for (const plane of [...PLANES, { id: 'foreground', file: 'Foreground' }]) {
-    const caName = `${id}.${name}_${plane.file}-${cls}.ca`;
+    const caName = `7400.WWDC_2022_${plane.file}-${CLS}.ca`;
     planeFiles[plane.id] = caName;
     const caDir = `${wpDir}/${caName}`;
     caDirs[plane.id] = caDir;
@@ -252,15 +270,13 @@ export async function buildClassicDescriptor(project, render, opts = {}) {
   }
   add(
     `${wpDir}/Wallpaper.plist`,
-    toXmlPlist({
+    toBinaryPlist({
       appearanceAware: !!project.appearanceAware,
-      assets: { lockAndHome: { default: { backgroundAnimationFileName: planeFiles.background, floatingAnimationFileNameKey: planeFiles.floating, foregroundAnimationFileName: planeFiles.foreground, identifier: int(id), name: project.name || 'Wallpaper', type: 'LayeredAnimation' } } },
-      contentVersion: real(2.01),
-      family: name,
+      assets: { lockAndHome: { default: { backgroundAnimationFileName: planeFiles.background, floatingAnimationFileNameKey: planeFiles.floating, foregroundAnimationFileName: planeFiles.foreground, identifier: int(7400), name: 'WWDC 2022', type: 'LayeredAnimation' } } },
+      family: 'WWDC22',
       identifier: int(id),
-      logicalScreenClass: cls,
+      logicalScreenClass: CLS,
       name: project.name || 'Wallpaper',
-      preferredProminentColor: { dark: '#000000', default: '#FFFFFF' },
       version: int(1),
     })
   );

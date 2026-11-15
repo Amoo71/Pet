@@ -124,6 +124,29 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   const ipic = imp.layers.find((x) => x.name === 'pic');
   assert(ipic.states.Unlock && Math.abs(ipic.states.Unlock.y - pic.states.Unlock.y) < 2, 'state y survives a modern round trip');
   assert.equal(ipic.parallax, 14, 'parallax survives');
+  // 3D photo (offline depth) → depth layers with increasing gyro parallax
+  await pg.click('#libBtn');
+  await pg.click('.tpl[data-tpl="blank"]');
+  await pg.click('.tab[data-tab="layers"]');
+  fc = pg.waitForEvent('filechooser');
+  await pg.click('[data-add="photo3d"]');
+  await (await fc).setFiles(path.join(OUT, 'pic.png'));
+  await pg.click('.modal .seg-btn[data-v="simple"]');
+  await pg.click('.modal-actions button:has-text("Create 3D layers")');
+  await pg.waitForFunction(() => window.__studio.store.project.layers.length === 4, null, { timeout: 60000 });
+  const d3 = (await project()).layers.map((x) => x.parallax);
+  assert(d3[0] < d3[1] && d3[1] < d3[2] && d3[2] < d3[3], 'nearer layers move more');
+  assert.equal((await project()).format, 'modern');
+  // effects: Duo fold on the 3D photo project
+  await pg.click('[data-add="effects"]');
+  await pg.click('.modal-actions button:has-text("Apply")');
+  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.fx === 'duotilt' && x.gyro.tilt > 0), null, { timeout: 60000 });
+  // turn it off again → the original layers come back
+  await pg.click('[data-add="effects"]');
+  await pg.click('.fx[data-fx="duotilt"]');
+  await pg.click('.fx[data-fx="duo"]');
+  await pg.click('.modal-actions button:has-text("Apply")');
+  await pg.waitForFunction(() => { const p = window.__studio.store.project; return !p.layers.some((x) => x.fx === 'duotilt') && p.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0) && p.layers.filter((x) => !x.fx).every((x) => !x.hidden); }, null, { timeout: 60000 });
   // Duo template + postures
   await pg.click('#libBtn');
   await pg.click('.tpl[data-tpl="duo3d"]');

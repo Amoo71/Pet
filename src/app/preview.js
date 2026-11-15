@@ -175,8 +175,15 @@ function paintLayer(l, n, p, animate) {
   o.style.width = `${l.w}px`;
   o.style.height = `${l.h}px`;
   o.style.opacity = Math.max(0, Math.min(1, e.opacity));
+  const an = l.anchor || { x: 0.5, y: 0.5 };
+  o.style.transformOrigin = `${an.x * 100}% ${an.y * 100}%`;
+  if (n.gy) n.gy.style.transformOrigin = o.style.transformOrigin;
   o.style.transform = `rotate(${e.rotation}deg) rotateY(${e.rotY || 0}deg) rotateX(${e.rotX || 0}deg) scale(${e.scale})`;
-  o.style.transformStyle = e.rotX || e.rotY || l.gyro?.tilt ? 'preserve-3d' : '';
+  const folding = p.format !== 'classic' && (l.gyro?.tilt > 0 || l.gyro?.fold > 0);
+  o.style.transformStyle = e.rotX || e.rotY || folding ? 'preserve-3d' : '';
+  // mirrors the export: the layer gives its folding content its own perspective
+  o.style.perspective = folding ? `${p.perspective || 900}px` : '';
+  o.style.perspectiveOrigin = folding ? `${an.x * 100}% ${an.y * 100}%` : '';
   o.style.borderRadius = l.cornerRadius ? `${l.cornerRadius}px` : '';
   o.style.overflow = l.cornerRadius ? 'hidden' : '';
   o.style.visibility = l.hidden ? 'hidden' : '';
@@ -631,14 +638,20 @@ function applyGyro(l, n, p) {
   const first = n.gy;
   if (!first) return;
   const t = g.tilt || 0;
-  first.style.transform = t ? `rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * t}deg)` : '';
+  const fold = g.fold || 0;
+  const an = l.anchor || { x: 0.5, y: 0.5 };
+  first.style.transformOrigin = `${an.x * 100}% ${an.y * 100}%`;
+  const parts = [];
+  if (fold) parts.push(`rotateY(${((live.tiltX + 1) / 2) * fold}deg)`);
+  if (t) parts.push(`rotateY(${live.tiltX * t}deg) rotateX(${-live.tiltY * t}deg)`);
+  first.style.transform = parts.join(' ');
   if (g.fade && g.fade !== 'none') {
     const axis = g.fade.replace('-', '');
     let u = ((axis === 'x' ? live.tiltX : live.tiltY) + 1) / 2;
     if (g.fade.startsWith('-')) u = 1 - u;
     const lo = g.fadeMin ?? 0;
     const hi = g.fadeMax ?? 1;
-    first.style.opacity = String(lo + (hi - lo) * u);
+    first.style.opacity = String(Math.max(0, Math.min(1, lo + (hi - lo) * u)));
   } else first.style.opacity = '';
 }
 

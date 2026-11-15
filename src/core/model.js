@@ -28,7 +28,7 @@ export const ANIMATABLE = [
 ];
 
 /** Gyro effects per layer. move = translation (device-verified); tilt & fade are experimental. */
-export const DEFAULT_GYRO = { tilt: 0, fade: 'none', fadeMin: 0, fadeMax: 1 };
+export const DEFAULT_GYRO = { tilt: 0, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 };
 
 /** iPhone Duo (foldable) screens – Apple's numbers from the iOS 27 Clownfish-V68 wallpaper. */
 export const DUO = {
@@ -183,6 +183,7 @@ export function newLayer(kind, project, props = {}) {
     states: {},
     anims: [],
     parallax: 0,
+    anchor: { x: 0.5, y: 0.5 }, // rotation / scale pivot (0..1 of the layer box, y down)
     gyro: { ...DEFAULT_GYRO },
     fastFade: false,
     blend: 'normal',
@@ -286,7 +287,7 @@ export function animatedProps(layer, appearanceAware) {
   return [...props].filter((p) => ANIMATABLE.some((a) => a.id === p));
 }
 
-export const isGyro = (layer) => layer.parallax > 0 || layer.gyro?.tilt > 0 || (layer.gyro?.fade && layer.gyro.fade !== 'none');
+export const isGyro = (layer) => layer.parallax > 0 || layer.gyro?.tilt > 0 || layer.gyro?.fold > 0 || (layer.gyro?.fade && layer.gyro.fade !== 'none');
 
 export const hasLoops = (layer) => (layer.anims || []).some((a) => a.enabled !== false && a.repeat !== 'once') || layer.kind === 'emitter' || (layer.kind === 'video' && (layer.video?.frames?.length || 0) > 1);
 
@@ -315,6 +316,7 @@ export function migrateProject(p) {
     l.rotX ??= 0;
     l.rotY ??= 0;
     l.gyro = { ...DEFAULT_GYRO, ...(l.gyro || {}) };
+    l.anchor ??= { x: 0.5, y: 0.5 };
     l.fastFade ??= false;
     l.blend ??= 'normal';
     l.filters = { ...DEFAULT_FILTERS, ...(l.filters || {}) };

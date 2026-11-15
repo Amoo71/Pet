@@ -397,6 +397,245 @@ export function changeDevice(id) {
   });
 }
 
+// ---------------------------------------------------------------- browse public catalogs
+
+export async function openBrowse(initial = 'apple') {
+  const cat = await import('../browser/catalog.js');
+  const state = { col: initial, q: '', items: [], shown: 60, ctrl: null };
+  const grid = el('div', { class: 'cat-grid' });
+  const status = el('p', { class: 'muted' }, 'Loading…');
+  const more = button('Show more', () => ((state.shown += 60), draw()), 'subtle');
+  const search = el('input', { type: 'search', class: 'text', placeholder: 'Search wallpapers…', id: 'catSearch', autocomplete: 'off' });
+  const tabs = segmented(cat.COLLECTIONS.map((c) => [c.id, c.name]), () => state.col, (v) => {
+    state.col = v;
+    tabs.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    load();
+  }, 'cat-tabs');
+  const card = (w) => {
+    const isVideo = /\.(mp4|mov|webm)$/i.test(w.preview);
+    const media = w.preview ? (isVideo ? el('video', { src: w.preview, muted: true, autoplay: true, loop: true, playsinline: true }) : el('img', { src: w.preview, loading: 'lazy', alt: w.name })) : el('div', { class: 'cat-noimg' }, '◐');
+    const c = el('div', { class: 'cat-card' }, [
+      el('div', { class: 'cat-media' }, media),
+      el('div', { class: 'cat-meta' }, [el('b', {}, w.name), el('small', {}, [w.author || w.source, w.description ? ` · ${w.description}` : ''])]),
+      el('div', { class: 'btn-row' }, [button('Open', () => fetchAndOpen(w, false)), button('✨ Morph', () => fetchAndOpen(w, true), 'primary')]),
+    ]);
+    return c;
+  };
+  const draw = () => {
+    const q = state.q.trim().toLowerCase();
+    const list = q ? state.items.filter((w) => `${w.name} ${w.author || ''} ${w.description || ''}`.toLowerCase().includes(q)) : state.items;
+    grid.innerHTML = '';
+    list.slice(0, state.shown).forEach((w) => grid.append(card(w)));
+    more.hidden = list.length <= state.shown;
+    status.textContent = `${list.length} wallpaper${list.length === 1 ? '' : 's'} · from public GitHub repos (Placard sources)`;
+  };
+  const load = async () => {
+    state.ctrl?.abort();
+    state.ctrl = new AbortController();
+    status.textContent = 'Loading…';
+    grid.innerHTML = '';
+    state.shown = 60;
+    try {
+      state.items = await cat.loadCollection(state.col, state.ctrl.signal);
+      draw();
+    } catch (e) {
+      if (e.name !== 'AbortError') status.textContent = `Couldn’t load this collection (${e.message}). Check your connection.`;
+    }
+  };
+  let t = 0;
+  search.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => ((state.q = search.value), (state.shown = 60), draw()), 200);
+  });
+  const close = modal('🌐 Browse wallpapers', [el('div', { class: 'gif-bar' }, [search, tabs]), status, grid, more]);
+  const fetchAndOpen = async (w, morph) => {
+    close();
+    const pm = progressModal(`Downloading “${w.name}”…`);
+    try {
+      const bytes = await cat.downloadTendies(w.url, (got, total) => pm.set(got, total, `${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`), pm.signal);
+      pm.close();
+      const file = new File([bytes], `${w.name}.tendies`);
+      const projects = await importTendiesFile(file);
+      if (morph && projects?.length) await openEffects();
+    } catch (e) {
+      pm.close();
+      if (e.name !== 'AbortError') toast(`Download failed: ${e.message}`, 'error', 6000);
+    }
+  };
+  load();
+}
+
+// ---------------------------------------------------------------- effects / morph mode
+
+function effectsForm(state) {
+  const { EFFECTS, DUO_DEFAULTS } = state.mod;
+  state.ids ||= new Set(state.applied?.length ? state.applied : ['duotilt']);
+  state.duo ||= { ...DUO_DEFAULTS };
+  const duoOpts = el('div', { class: 'form duo-opts' }, [
+    numField('Tilt angle', () => state.duo.tilt, (v) => (state.duo.tilt = v), { min: 4, max: 30, step: 1, slider: true, unit: '°' }),
+    numField('Fold angle', () => state.duo.angle, (v) => (state.duo.angle = v), { min: 15, max: 90, step: 1, slider: true, unit: '°' }),
+    numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 60, step: 1, slider: true, unit: 'pt' }),
+    numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 0.9, step: 0.02, slider: true }),
+    toggleField('Folded on Lock, opens on unlock', () => state.duo.unlock, (v) => (state.duo.unlock = v)),
+  ]);
+  const grid = el('div', { class: 'fx-grid' }, EFFECTS.map((fx) => {
+    const b = el('button', { type: 'button', class: `fx ${state.ids.has(fx.id) ? 'on' : ''}`, 'data-fx': fx.id, title: fx.desc }, [el('span', { class: 'fx-ico' }, fx.icon), el('b', {}, fx.name), el('small', {}, fx.desc)]);
+    b.addEventListener('click', () => {
+      state.ids.has(fx.id) ? state.ids.delete(fx.id) : state.ids.add(fx.id);
+      b.classList.toggle('on', state.ids.has(fx.id));
+      duoOpts.hidden = !state.ids.has('duo') && !state.ids.has('duotilt');
+    });
+    return b;
+  }));
+  duoOpts.hidden = !state.ids.has('duo') && !state.ids.has('duotilt');
+  return [state.applied?.length ? el('p', { class: 'muted' }, 'Highlighted = already on this wallpaper. Tap one to turn it off, then Apply.') : null, grid, duoOpts, el('p', { class: 'muted' }, 'Duo fold, 3D tilt and gyro fade use gyro key paths beyond plain translation – experimental on device. Gyro needs the Modern format, effects switch to it automatically.')];
+}
+
+export async function openEffects() {
+  const mod = await import('./effects.js');
+  const state = { mod, applied: mod.appliedEffects(store.project) };
+  const go = await new Promise((resolve) => modal('✨ Effects', effectsForm(state), [['Cancel', (c) => (c(), resolve(false))], ['Apply', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
+  const pm = progressModal('Adding effects…');
+  try {
+    const apply = await mod.prepareEffects(store.project, [...state.ids], { duo: state.duo });
+    let done = [];
+    update((p) => (done = apply(p)));
+    pm.close();
+    toast(done.length ? `${done.join(', ')} – try ▶ Preview and tilt.` : 'No changes.', 'ok', 6000);
+  } catch (e) {
+    pm.close();
+    console.error(e);
+    toast(`Effects failed: ${e.message}`, 'error', 6000);
+  }
+}
+
+/** Morph mode: import one or more .tendies, add effects to each, save them to the library. */
+export async function morphTendies() {
+  const files = await pickFiles('.tendies,.zip,application/zip,application/octet-stream', true);
+  if (!files.length) return;
+  const mod = await import('./effects.js');
+  const state = { mod };
+  const go = await new Promise((resolve) => modal(`Morph ${files.length} wallpaper${files.length > 1 ? 's' : ''}`, [el('p', {}, 'Pick the effects to add to every imported wallpaper. The originals stay untouched; morphed copies are saved to your library.'), ...effectsForm(state)], [['Cancel', (c) => (c(), resolve(false))], ['Morph', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
+  const pm = progressModal('Morphing…');
+  const results = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      pm.set(i, files.length, `${files[i].name} (${i + 1}/${files.length})`);
+      const { projects, warnings } = await importTendies(await files[i].arrayBuffer(), (blob) => addAsset(blob));
+      for (const w of warnings.slice(0, 2)) toast(`${files[i].name}: ${w}`, 'warn', 5000);
+      for (const proj of projects) {
+        const d = getDevice(proj.device);
+        proj._w = d.w;
+        proj._h = d.h;
+        const apply = await mod.prepareEffects(proj, [...state.ids], { duo: state.duo });
+        apply(proj);
+        proj.name = `${proj.name} ✦`;
+        proj.updated = Date.now();
+        await saveProject(proj);
+        results.push(proj);
+      }
+    }
+    pm.close();
+    if (!results.length) return toast('Nothing could be imported from those files.', 'warn');
+    setProject(results[0]);
+    if (results.length > 1)
+      modal('Morph done', el('p', {}, `${results.length} wallpapers morphed and saved to your library.`), [
+        ['Close', (c) => c()],
+        ['Export all as collection', (c) => (c(), exportCollection(results.map((r) => r.id))), 'primary'],
+      ]);
+    else toast('Morphed copy saved – preview it, then Export.', 'ok', 5000);
+  } catch (e) {
+    pm.close();
+    console.error(e);
+    toast(`Morph failed: ${e.message}`, 'error', 6000);
+  }
+}
+
+// ---------------------------------------------------------------- 3D photo (depth layers + gyro)
+
+export async function add3DPhoto() {
+  const [file] = await pickFiles('image/*');
+  if (!file) return;
+  const opts = { mode: 'ai', layers: 4, strength: 28, tilt: 6, front: true, zoom: true, replace: true };
+  const modeSeg = segmented([['ai', 'AI (best)'], ['simple', 'Simple (offline)']], () => opts.mode, (v) => {
+    opts.mode = v;
+    modeSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  });
+  const body = el('div', { class: 'form' }, [
+    el('p', {}, 'Splits your picture into depth layers. Tilting the iPhone moves near layers more than far ones – the iPhone Duo style 3D depth effect.'),
+    el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Depth from'), modeSeg]),
+    el('p', { class: 'muted' }, 'AI downloads a ~27 MB depth model once (Depth Anything v2, runs on your device). Simple works offline: lower = nearer.'),
+    numField('Layers', () => opts.layers, (v) => (opts.layers = Math.max(2, Math.min(6, Math.round(v)))), { min: 2, max: 6, step: 1, slider: true }),
+    numField('Depth strength', () => opts.strength, (v) => (opts.strength = v), { min: 6, max: 60, step: 1, slider: true, unit: 'pt' }),
+    numField('3D tilt', () => opts.tilt, (v) => (opts.tilt = v), { min: 0, max: 20, step: 1, slider: true, unit: '°' }),
+    toggleField('Subject in front of clock', () => opts.front, (v) => (opts.front = v), 'Nearest layer goes above the clock (depth effect)'),
+    toggleField('Zoom on unlock', () => opts.zoom, (v) => (opts.zoom = v), 'Background pushes in, subject settles while you swipe'),
+    toggleField('Replace current layers', () => opts.replace, (v) => (opts.replace = v)),
+  ]);
+  const go = await new Promise((resolve) => modal('3D photo', body, [['Cancel', (c) => (c(), resolve(false))], ['Create 3D layers', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
+  const pm = progressModal('Building 3D layers…');
+  try {
+    const { blobToImage } = await import('../browser/raster.js');
+    const depthMod = await import('../browser/depth.js');
+    const { blob } = await (await import('../browser/raster.js')).normaliseImage(file, { maxPx: 2400 });
+    const img = await blobToImage(blob);
+    let dm;
+    if (opts.mode === 'ai') {
+      try {
+        dm = await depthMod.aiDepth(img, (f, t) => pm.set(f, 1, t));
+      } catch (e) {
+        console.warn('AI depth failed', e);
+        toast('AI depth model couldn’t load here – using the simple depth instead.', 'warn', 6000);
+      }
+    }
+    if (!dm) dm = depthMod.simpleDepth(256, Math.round((256 * img.height) / img.width));
+    pm.set(0, opts.layers, 'Slicing layers…');
+    const slices = await depthMod.sliceByDepth(img, dm, opts.layers);
+    const { canvasToBlob } = await import('../browser/raster.js');
+    const p = store.project;
+    const N = opts.strength;
+    const k = Math.max(p._w / img.width, p._h / img.height);
+    const newLayers = [];
+    for (let i = 0; i < slices.length; i++) {
+      const s = slices[i];
+      pm.set(i + 1, slices.length, `Saving layer ${i + 1} of ${slices.length}`);
+      const b = await canvasToBlob(s.canvas, i === 0 ? 'image/jpeg' : 'image/png', 0.9);
+      const id = await addAsset(b, { w: s.canvas.width, h: s.canvas.height });
+      const par = Math.round(N * (0.15 + 0.85 * s.depthRank));
+      const bleed = 1 + (2 * par + 8) / Math.min(p._w, p._h);
+      const near = i === slices.length - 1;
+      const l = newLayer('image', p, {
+        asset: id,
+        name: i === 0 ? '3D background' : near ? '3D subject' : `3D depth ${i}`,
+        w: Math.round(img.width * k * bleed),
+        h: Math.round(img.height * k * bleed),
+        fit: 'cover',
+        plane: near && opts.front ? 'floating' : 'background',
+        parallax: par,
+        gyro: { tilt: Math.round(opts.tilt * s.depthRank), fade: 'none', fadeMin: 0, fadeMax: 1 },
+        states: opts.zoom ? { Unlock: { scale: i === 0 ? 1.08 : 1 + 0.04 * (1 - s.depthRank) }, Sleep: { scale: 0.97 } } : {},
+      });
+      newLayers.push(l);
+    }
+    update((proj) => {
+      if (opts.replace) proj.layers = [];
+      proj.layers.push(...newLayers);
+      if (proj.format === 'classic') proj.format = 'modern';
+      if (!proj.name || /^(New wallpaper|My Wallpaper)$/.test(proj.name)) proj.name = file.name.replace(/\.[^.]+$/, '').slice(0, 30) || '3D photo';
+    });
+    select(newLayers.at(-1).id);
+    pm.close();
+    toast('3D layers ready – switch to ▶ Preview and move the mouse (or 🧭 Motion on iPhone) to tilt.', 'ok', 7000);
+  } catch (e) {
+    console.error(e);
+    pm.close();
+    toast(`3D photo failed: ${e.message}`, 'error', 6000);
+  }
+}
+
 export function setFormat(v) {
   const p = store.project;
   if (p.format === v) return;
@@ -430,9 +669,10 @@ export function openExport() {
   const body = el('div', { class: 'export' }, [
     el('div', { class: 'format-cards' }, [
       formatCard('modern', 'Modern', 'iOS 26 / 27', ['Follows your finger when swiping', 'Gyro parallax', 'iOS 27 depth fix (Clownfish)', 'Liquid Glass'], opts),
-      formatCard('duo', 'Duo', 'iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Apple’s split-screen schema'], opts),
+      formatCard('duo', 'Duo', 'only iPhone Duo · iOS 27', ['Cover + inner screen, portrait & landscape', 'Gyro, 3D, depth', 'Won’t appear on regular iPhones'], opts),
       formatCard('classic', 'Classic', 'iOS 17 – 26', ['Spring animation after unlock', 'Light / Dark variants', 'Most compatible with older tools'], opts),
     ]),
+    el('p', { class: 'muted' }, 'Placard tip: Classic uses exactly the structure of community wallpapers verified on iOS 27.2 – if a Modern wallpaper doesn’t show up in Collections, export Classic. After installing, respring (Placard → refresh) and look under + → Collections.'),
     selectField('Quality', [[3, 'Best (@3x)'], [2, 'Performance (@2x, smaller)']], () => opts.scale, (v) => ((opts.scale = Number(v)), refreshMem())),
     mem,
     issues.length ? el('ul', { class: 'issues' }, issues.map((i) => el('li', { class: `issue-${i.level}` }, i.msg))) : el('p', { class: 'ok-note' }, '✓ Ready to export'),
