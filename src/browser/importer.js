@@ -139,6 +139,7 @@ export async function importTendies(buf, storeAsset) {
         return bytes ? storeAsset(new Blob([bytes], { type: mime(s) })) : null;
       };
       const layerGeo = new Map(); // editor layer -> { pm: parent sublayer-space matrix, px, py }
+      const idGeo = new Map(); // CA id -> the same for the element that carries the id (state targets)
       const walk = async (el, space, op, chain, plane) => {
         for (const child of el.querySelectorAll(':scope > sublayers > *')) {
           const tag = child.tagName;
@@ -157,7 +158,7 @@ export async function importTendies(buf, storeAsset) {
           const opAttr = child.hasAttribute('opacity') ? Number(child.getAttribute('opacity')) : 1;
           const tr = parseTransform(child.getAttribute('transform'));
           const ownUniform = Math.abs(Math.abs(tr.sx) - Math.abs(tr.sy)) < 1e-6 && tr.sx !== 0;
-          const link = { name, opAttr, el: child };
+          const link = { name, opAttr, el: child, pm: space, px: ppx, py: ppy, ts: tr.sx || 1, tr: tr.rot };
           const nextChain = [...chain, link];
           if (tag === 'CAEmitterLayer') {
             warnings.push(`Particle layer “${name}” was skipped.`);
@@ -166,9 +167,9 @@ export async function importTendies(buf, storeAsset) {
           if (tag === 'CABackdropLayer') {
             const l = newLayer('glass', proj, { name: name || 'Glass', plane: pl, x: cx, y: H - cy, w: (w || 100) * wsx, h: (h || 100) * wsy, cornerRadius: Number(child.querySelector('CASDFElementLayer')?.getAttribute('cornerRadius')) || Number(child.getAttribute('cornerRadius')) || 0, glass: { mode: child.querySelector('CASDFLayer') ? 'liquid' : 'live', blur: 20, tint: '#ffffff', tintOpacity: 0.1, border: 0.4, saturation: 1.4, shine: 0.3, refraction: 80 } });
             proj.layers.push(l);
-            for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer: l, opAttr: c.opAttr });
+            for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer: l, opAttr: c.opAttr, pm: c.pm });
             const id = child.getAttribute('id');
-            if (id) byId.set(id, l);
+            if (id) (byId.set(id, l), idGeo.set(id, { pm: space, px: ppx, py: ppy, ts: tr.sx || 1, tr: tr.rot }));
             continue;
           }
           const img = child.querySelector(':scope > contents > CGImage, :scope > contents[src]');
@@ -216,11 +217,11 @@ export async function importTendies(buf, storeAsset) {
               filters: { blur: Number(blur) || 0, hue: 0, saturate: 1, contrast: 1 },
             });
             proj.layers.push(layer);
-            layerGeo.set(layer, { pm: space, px: ppx, py: ppy });
-            for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer, opAttr: c.opAttr });
+            layerGeo.set(layer, { pm: space, px: ppx, py: ppy, s0: layer.scale, r0: layer.rotation, ts: tr.sx || 1, tr: tr.rot });
+            for (const c of nextChain) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push({ layer, opAttr: c.opAttr, pm: c.pm });
             for (const c of nextChain) {
               const id = c.el.getAttribute('id');
-              if (id && !byId.has(id)) byId.set(id, layer);
+              if (id && !byId.has(id)) (byId.set(id, layer), idGeo.set(id, { pm: c.pm, px: c.px, py: c.py, ts: c.ts, tr: c.tr }));
             }
           }
           if (nextChain.length < 12) await walk(child, childSpace(child, own), op, nextChain, pl);
@@ -229,9 +230,9 @@ export async function importTendies(buf, storeAsset) {
       // the root's sublayers: root bounds space = document space
       await walk(root, childSpace(root, I2), 1, [], planeOf(caName, wp));
       // a position change (in the layer's parent space) → screen delta
-      const screenDelta = (layer, dx, dy) => {
-        const g = layerGeo.get(layer);
-        const m = g ? g.pm : I2;
+      // a position change, expressed in the space the changed element lives in → screen delta
+      const screenDelta = (m, dx, dy) => {
+        m ||= I2;
         return [m[0] * dx + m[2] * dy, -(m[1] * dx + m[3] * dy)];
       };
 
@@ -248,13 +249,28 @@ export async function importTendies(buf, storeAsset) {
           const def = ANIMATABLE.find((a) => a.keyPath === kp || a.pcaKeyPath === kp);
           if (!def) continue;
           let v = Number(val.getAttribute('value'));
-          const g = layerGeo.get(layer);
+          const g = idGeo.get(sv.getAttribute('targetId')) || layerGeo.get(layer);
           if ((def.id === 'x' || def.id === 'y') && g) {
-            const [dx, dy] = def.id === 'x' ? screenDelta(layer, v - g.px, 0) : screenDelta(layer, 0, v - g.py);
+            const [dx, dy] = def.id === 'x' ? screenDelta(g.pm, v - g.px, 0) : screenDelta(g.pm, 0, v - g.py);
             const tgt = key === 'Locked' ? layer : (layer.states[key] ||= {});
             const baseX = layer.x, baseY = layer.y;
             if (Math.abs(dx) > 1e-6) tgt.x = baseX + dx;
             if (Math.abs(dy) > 1e-6) tgt.y = baseY + dy;
+            continue;
+          }
+          const g0 = layerGeo.get(layer);
+          if (def.id === 'scale' && g && g0) {
+            // relative to the target element's own transform scale (already part of the imported size/scale)
+            v = (g0.s0 * v) / (g.ts || 1);
+            if (key === 'Locked') layer.scale = v;
+            else (layer.states[key] ||= {}).scale = v;
+            continue;
+          }
+          if (def.id === 'rotation' && g && g0) {
+            // CA radians, counter-clockwise; editor degrees clockwise; relative to the element's own rotation
+            v = g0.r0 - (v * RAD - (g.tr || 0));
+            if (key === 'Locked') layer.rotation = v;
+            else (layer.states[key] ||= {}).rotation = v;
             continue;
           }
           if (def.id === 'y') v = H - v;
@@ -277,10 +293,10 @@ export async function importTendies(buf, storeAsset) {
           const vl = Number(val(d, 'v_lock'));
           const vh = Number(val(d, 'v_home'));
           const vs = Number(val(d, 'v_sleep'));
-          for (const { layer, opAttr } of targets) {
+          for (const { layer, opAttr, pm } of targets) {
             const set = (st, prop, v) => (layer.states[st] ||= {})[prop] = Math.round(v * 1000) / 1000;
             if (kp === 'position.x' || kp === 'position.y') {
-              const d = (v) => (kp === 'position.x' ? screenDelta(layer, v, 0) : screenDelta(layer, 0, v));
+              const d = (v) => (kp === 'position.x' ? screenDelta(pm, v, 0) : screenDelta(pm, 0, v));
               const [hx, hy] = d(vh - vl);
               const [sx2, sy2] = d(vs - vl);
               if (Math.abs(hx) > 1e-6 || Math.abs(sx2) > 1e-6) (set('Unlock', 'x', layer.x + hx), set('Sleep', 'x', layer.x + sx2));

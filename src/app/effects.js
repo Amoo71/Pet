@@ -338,7 +338,7 @@ export async function prepareEffects(project, ids, opts = {}) {
       }
       p.layers.unshift(...added.duotilt);
       // orthographic like on device (restored on removal)
-      p.fxApplied.duotilt.__project = { perspective: p.perspective };
+      (p.fxApplied.duotilt ||= {}).__project = { perspective: p.perspective };
       done.push('+ Duo 3D tilt');
     }
     if (added.duo) {
