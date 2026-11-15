@@ -134,4 +134,16 @@ assert.equal(old.layers[0].anims[0].preset, 'spin');
   const dup = all.filter((n, i) => all.indexOf(n) !== i && !n.startsWith('Cell'));
   assert.deepEqual(dup, [], 'unique layer names');
 }
+
+// --- anchor (hinge) + gyro fold
+{
+  const p = newProject();
+  const fold = newLayer('image', p, { asset: 'a', x: p._w / 4, w: p._w / 2, anchor: { x: 1, y: 0.5 }, gyro: { tilt: 0, fold: 60, fade: 'none', fadeMin: 0, fadeMax: 1 }, rotY: 20, states: { Unlock: { rotY: 0 } } });
+  p.layers.push(newLayer('color', p), fold);
+  const caml = text((await readZip(await buildTendies(p, render))).get([...(await readZip(await buildTendies(p, render))).keys()].find((n) => n.endsWith('main.caml'))));
+  assert(caml.includes('anchorPoint="1 0.5"'), 'anchor');
+  assert(caml.includes(`position="${p._w / 2} ${p._h / 2}"`), 'outer positioned at the hinge');
+  assert(caml.includes('value="transform.rotation.y"') && caml.includes('<mapMaxTo type="real" value="1.0472"/>'), 'fold gyro 60°');
+  assert(caml.includes('sublayerTransform="perspective('), 'own perspective');
+}
 console.log('OK');

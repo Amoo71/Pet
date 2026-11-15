@@ -1,5 +1,5 @@
 // Offline support: network-first for app files, cached copy as offline fallback.
-const CACHE = 'tendies-studio-v3';
+const CACHE = 'tendies-studio-v4';
 const SHELL = [
   './',
   './index.html',
@@ -28,6 +28,7 @@ const SHELL = [
   './src/core/template-data.js',
   './src/browser/gif.js',
   './src/browser/depth.js',
+  './src/app/effects.js',
   './src/browser/gifsearch.js',
   './src/browser/raster.js',
   './src/browser/storage.js',

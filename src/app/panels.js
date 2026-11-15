@@ -56,6 +56,7 @@ const iconBtn = (t, label, fn, cls = '') => el('button', { type: 'button', class
 // ---------------------------------------------------------------- Layers
 
 export const ADD = [
+  ['effects', '✨', 'Effects', () => A.openEffects()],
   ['photo3d', '🧊', '3D photo', () => A.add3DPhoto()],
   ['image', '🖼️', 'Image', () => A.addImages()],
   ['gif', '🔍', 'GIF search', () => A.openGifSearch()],
@@ -396,6 +397,8 @@ function motionPanel() {
         numField('Move', () => selectedLayer().parallax || 0, (v) => L((x) => (x.parallax = Math.max(0, v)), g('px')), { min: 0, max: 60, slider: true, unit: 'pt' }),
         el('p', { class: 'muted' }, 'Shift when the phone tilts (device-verified). Far 4–8 · middle 10–14 · near 20–40 – nearer layers move more.'),
         numField('3D tilt', () => gy().tilt || 0, GY('tilt'), { min: 0, max: 45, slider: true, unit: '°' }),
+        numField('Fold (Duo)', () => gy().fold || 0, GY('fold'), { min: 0, max: 90, slider: true, unit: '°' }),
+        el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Pivot'), segmented([['0.5,0.5', 'Center'], ['1,0.5', 'Right edge'], ['0,0.5', 'Left edge'], ['0.5,1', 'Bottom'], ['0.5,0', 'Top']], () => { const a = selectedLayer().anchor || { x: 0.5, y: 0.5 }; return `${a.x},${a.y}`; }, (v) => L((x) => { const [ax, ay] = v.split(',').map(Number); x.anchor = { x: ax, y: ay }; }))]),
         el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Gyro fade'), segmented([['none', 'Off'], ['x', '← →'], ['-x', '→ ←'], ['y', '↑ ↓'], ['-y', '↓ ↑']], () => gy().fade || 'none', GY('fade', String))]),
         gy().fade && gy().fade !== 'none' ? numField('Fade from', () => gy().fadeMin ?? 0, GY('fadeMin'), { min: 0, max: 1, step: 0.05, slider: true }) : null,
         gy().fade && gy().fade !== 'none' ? numField('Fade to', () => gy().fadeMax ?? 1, GY('fadeMax'), { min: 0, max: 1, step: 0.05, slider: true }) : null,

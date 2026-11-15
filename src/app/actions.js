@@ -397,6 +397,93 @@ export function changeDevice(id) {
   });
 }
 
+// ---------------------------------------------------------------- effects / morph mode
+
+function effectsForm(state) {
+  const { EFFECTS, DUO_DEFAULTS } = state.mod;
+  state.ids ||= new Set(['duo']);
+  state.duo ||= { ...DUO_DEFAULTS };
+  const duoOpts = el('div', { class: 'form duo-opts' }, [
+    numField('Fold angle', () => state.duo.angle, (v) => (state.duo.angle = v), { min: 15, max: 90, step: 1, slider: true, unit: '°' }),
+    numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 60, step: 1, slider: true, unit: 'pt' }),
+    numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 0.9, step: 0.02, slider: true }),
+    toggleField('Folded on Lock, opens on unlock', () => state.duo.unlock, (v) => (state.duo.unlock = v)),
+  ]);
+  const grid = el('div', { class: 'fx-grid' }, EFFECTS.map((fx) => {
+    const b = el('button', { type: 'button', class: `fx ${state.ids.has(fx.id) ? 'on' : ''}`, 'data-fx': fx.id, title: fx.desc }, [el('span', { class: 'fx-ico' }, fx.icon), el('b', {}, fx.name), el('small', {}, fx.desc)]);
+    b.addEventListener('click', () => {
+      state.ids.has(fx.id) ? state.ids.delete(fx.id) : state.ids.add(fx.id);
+      b.classList.toggle('on', state.ids.has(fx.id));
+      duoOpts.hidden = !state.ids.has('duo');
+    });
+    return b;
+  }));
+  duoOpts.hidden = !state.ids.has('duo');
+  return [grid, duoOpts, el('p', { class: 'muted' }, 'Duo fold, 3D tilt and gyro fade use gyro key paths beyond plain translation – experimental on device. Gyro needs the Modern format, effects switch to it automatically.')];
+}
+
+export async function openEffects() {
+  const mod = await import('./effects.js');
+  const state = { mod };
+  const go = await new Promise((resolve) => modal('✨ Add effects', effectsForm(state), [['Cancel', (c) => (c(), resolve(false))], ['Apply', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go || !state.ids.size) return;
+  const pm = progressModal('Adding effects…');
+  try {
+    const apply = await mod.prepareEffects(store.project, [...state.ids], { duo: state.duo });
+    let done = [];
+    update((p) => (done = apply(p)));
+    pm.close();
+    toast(`Added: ${done.join(', ')} – try ▶ Preview and tilt.`, 'ok', 6000);
+  } catch (e) {
+    pm.close();
+    console.error(e);
+    toast(`Effects failed: ${e.message}`, 'error', 6000);
+  }
+}
+
+/** Morph mode: import one or more .tendies, add effects to each, save them to the library. */
+export async function morphTendies() {
+  const files = await pickFiles('.tendies,.zip,application/zip,application/octet-stream', true);
+  if (!files.length) return;
+  const mod = await import('./effects.js');
+  const state = { mod };
+  const go = await new Promise((resolve) => modal(`Morph ${files.length} wallpaper${files.length > 1 ? 's' : ''}`, [el('p', {}, 'Pick the effects to add to every imported wallpaper. The originals stay untouched; morphed copies are saved to your library.'), ...effectsForm(state)], [['Cancel', (c) => (c(), resolve(false))], ['Morph', (c) => (c(), resolve(true)), 'primary']]));
+  if (!go) return;
+  const pm = progressModal('Morphing…');
+  const results = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      pm.set(i, files.length, `${files[i].name} (${i + 1}/${files.length})`);
+      const { projects, warnings } = await importTendies(await files[i].arrayBuffer(), (blob) => addAsset(blob));
+      for (const w of warnings.slice(0, 2)) toast(`${files[i].name}: ${w}`, 'warn', 5000);
+      for (const proj of projects) {
+        const d = getDevice(proj.device);
+        proj._w = d.w;
+        proj._h = d.h;
+        const apply = await mod.prepareEffects(proj, [...state.ids], { duo: state.duo });
+        apply(proj);
+        proj.name = `${proj.name} ✦`;
+        proj.updated = Date.now();
+        await saveProject(proj);
+        results.push(proj);
+      }
+    }
+    pm.close();
+    if (!results.length) return toast('Nothing could be imported from those files.', 'warn');
+    setProject(results[0]);
+    if (results.length > 1)
+      modal('Morph done', el('p', {}, `${results.length} wallpapers morphed and saved to your library.`), [
+        ['Close', (c) => c()],
+        ['Export all as collection', (c) => (c(), exportCollection(results.map((r) => r.id))), 'primary'],
+      ]);
+    else toast('Morphed copy saved – preview it, then Export.', 'ok', 5000);
+  } catch (e) {
+    pm.close();
+    console.error(e);
+    toast(`Morph failed: ${e.message}`, 'error', 6000);
+  }
+}
+
 // ---------------------------------------------------------------- 3D photo (depth layers + gyro)
 
 export async function add3DPhoto() {

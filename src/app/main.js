@@ -131,6 +131,7 @@ async function openLibrary() {
   ));
   const close = modal('Library', [el('h3', {}, 'Start from a template'), templates, el('h3', {}, `Your wallpapers (${list.length})`), list.length ? grid : el('p', { class: 'muted' }, 'No projects yet.')], [
     ['Import .tendies', async (c) => { c(); await A.importTendiesFile(); }],
+    ['✨ Morph .tendies', async (c) => { c(); await A.morphTendies(); }],
     ['How to install', (c) => { c(); modal('Install on iPhone', installGuide()); }],
   ]);
   document.querySelector('.modal-actions')?.prepend(collectBtn);

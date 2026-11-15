@@ -30,9 +30,17 @@ export function hexToRgb(hex = '#ffffff') {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => num(c / 255)).join(' ');
 }
 
+/** offset from the layer centre to its anchor point (editor coords) */
+export function anchorOffset(layer) {
+  const a = layer.anchor || { x: 0.5, y: 0.5 };
+  return { dx: (a.x - 0.5) * layer.w, dy: (a.y - 0.5) * layer.h, a };
+}
+const hasAnchor = (layer) => layer.anchor && (Math.abs(layer.anchor.x - 0.5) > 1e-6 || Math.abs(layer.anchor.y - 0.5) > 1e-6);
+
 /** editor value → CA value for a state property (needs the document height for y) */
-export function caStateValue(prop, v, H) {
-  if (prop === 'y') return H - v;
+export function caStateValue(prop, v, H, layer) {
+  if (prop === 'x' && layer && hasAnchor(layer)) return v + anchorOffset(layer).dx;
+  if (prop === 'y') return H - (v + (layer && hasAnchor(layer) ? anchorOffset(layer).dy : 0));
   if (prop === 'rotation' || prop === 'rotX') return -v * DEG;
   if (prop === 'rotY') return v * DEG;
   return v;
@@ -207,8 +215,10 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   }
   const fast = fastFadeActive(layer, ctx);
   const outerOpacity = fast ? Math.sqrt(Math.max(0, base.opacity)) : base.opacity;
+  // a layer whose content folds / tilts needs its own perspective, otherwise CALayer flattens the 3D
+  const ownPersp = usesGyro(ctx) && (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0) ? ` sublayerTransform="perspective(${num(ctx.perspective || 900)})"` : '';
   lines.push(
-    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" position="${num(base.x)} ${num(H - base.y)}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
+    `${pad()}<CALayer id="${esc(layer.id)}"${nugget} name="${esc(name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}"${anchorAttr(layer)}${ownPersp} position="${num(caStateValue('x', base.x, H, layer))} ${num(caStateValue('y', base.y, H, layer))}" opacity="${num(outerOpacity)}"${transformAttr(base.rotation, base.scale, base.rotX, base.rotY)} hidden="${layer.hidden ? 1 : 0}"${radius} geometryFlipped="0" ${COMMON} cornerCurve="continuous">`
   );
   depth++;
   const fx = filtersXml(layer, pad());
@@ -220,7 +230,8 @@ export function layerXml(layer, res, ctx, ind = '      ') {
   wrappers.forEach((w) => {
     lines.push(`${pad()}<sublayers>`);
     depth++;
-    lines.push(`${pad()}<${w.kind || 'CALayer'} id="${esc(layer.id)}-${w.suffix}" name="${esc(w.name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" ${center}${w.attrs || ''} ${COMMON}>`);
+    const where = w.pivot && hasAnchor(layer) ? `${anchorAttr(layer)} ${innerAnchorPos(layer)}` : center;
+    lines.push(`${pad()}<${w.kind || 'CALayer'} id="${esc(layer.id)}-${w.suffix}" name="${esc(w.name)}" bounds="0 0 ${num(layer.w)} ${num(layer.h)}" ${where}${w.attrs || ''} ${COMMON}>`);
     depth++;
   });
   // nested animation layers
@@ -284,6 +295,17 @@ export function layerXml(layer, res, ctx, ind = '      ') {
 
 const usesGyro = (ctx) => ctx.format === 'modern' || ctx.format === 'duo';
 
+/** anchorPoint attribute (CA is y-up, so the y component flips) */
+function anchorAttr(layer) {
+  if (!hasAnchor(layer)) return '';
+  return ` anchorPoint="${num(layer.anchor.x)} ${num(1 - layer.anchor.y)}"`;
+}
+/** position of the anchor inside the layer's own bounds (for pivoting wrappers) */
+function innerAnchorPos(layer) {
+  const a = layer.anchor || { x: 0.5, y: 0.5 };
+  return `position="${num(a.x * layer.w)} ${num((1 - a.y) * layer.h)}"`;
+}
+
 function fastFadeActive(layer, ctx) {
   return usesGyro(ctx) && layer.fastFade && animatedProps(layer, false).includes('opacity');
 }
@@ -292,7 +314,7 @@ function fastFadeActive(layer, ctx) {
 function wrapperSpecs(layer, ctx, name, base) {
   const out = [];
   if (fastFadeActive(layer, ctx)) out.push({ suffix: 'ff', name: `${name} Fade`, attrs: ` opacity="${num(Math.sqrt(Math.max(0, base.opacity)))}"` });
-  if (usesGyro(ctx) && layer.gyro?.tilt > 0) out.push({ suffix: 'tilt', name: `${name} Tilt` });
+  if (usesGyro(ctx) && (layer.gyro?.tilt > 0 || layer.gyro?.fold > 0)) out.push({ suffix: 'tilt', name: `${name} Tilt`, pivot: true });
   if (usesGyro(ctx) && layer.gyro?.fade && layer.gyro.fade !== 'none') out.push({ suffix: 'gf', name: `${name} GyroFade` });
   return out;
 }
@@ -304,7 +326,7 @@ export function layerPropertyGroups(layer, name, H) {
   const fast = layer.fastFade && props.includes('opacity');
   for (const p of props) {
     const def = ANIMATABLE.find((a) => a.id === p);
-    let v = (st) => caStateValue(p, effective(layer, st, false)[p], H);
+    let v = (st) => caStateValue(p, effective(layer, st, false)[p], H, layer);
     if (p === 'opacity' && fast) {
       const raw = v;
       v = (st) => Math.sqrt(Math.max(0, Math.min(1, raw(st))));
@@ -325,6 +347,8 @@ export function layerGyroGroups(layer, name) {
     out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: -t * DEG, max: t * DEG, type: 'real' });
     out.push({ name: `${name} Tilt`, axis: 'y', keyPath: 'transform.rotation.x', min: -t * DEG, max: t * DEG, type: 'real' });
   }
+  const fold = layer.gyro?.fold || 0;
+  if (fold > 0) out.push({ name: `${name} Tilt`, axis: 'x', keyPath: 'transform.rotation.y', min: 0, max: fold * DEG, type: 'real' });
   const f = layer.gyro?.fade;
   if (f && f !== 'none') {
     const axis = f.replace('-', '');
@@ -355,7 +379,7 @@ export function buildModernCaml(project, resources, opts = {}) {
   const W = project._w;
   const H = project._h;
   const names = uniqueNames(project.layers);
-  const ctx = { W, H, names, format: 'modern', batter: opts.batter };
+  const ctx = { W, H, names, format: 'modern', batter: opts.batter, perspective: project.perspective };
   const I = '  ';
   const props = [];
   const parallax = [];
@@ -412,7 +436,7 @@ export function buildDuoCaml(project, resources, opts = {}) {
     const copies = project.layers.map((l) => ({ ...l, id: `${l.id}-${key}` }));
     const names = new Map([...uniqueNames(project.layers)].map(([id, n]) => [`${id}-${key}`, `${n} ${key}`]));
     const res = new Map([...resources].map(([id, r]) => [`${id}-${key}`, r]));
-    const ctx = { W: S, H, names, format: 'duo', batter: opts.batter };
+    const ctx = { W: S, H, names, format: 'duo', batter: opts.batter, perspective: project.perspective };
     const trees = {};
     for (const plane of PLANES) {
       const layers = copies.filter((l) => l.plane === plane.id);
@@ -510,7 +534,7 @@ export function buildClassicCaml(project, planeId, resources, opts = {}) {
         const vals = effective(l, st.state, st.dark);
         for (const p of animated.get(l.id)) {
           const def = ANIMATABLE.find((a) => a.id === p);
-          els.push(`${I.repeat(5)}<LKStateSetValue targetId="${esc(l.id)}" keyPath="${def.keyPath}">${valueXml(p, caStateValue(p, vals[p], H))}</LKStateSetValue>`);
+          els.push(`${I.repeat(5)}<LKStateSetValue targetId="${esc(l.id)}" keyPath="${def.keyPath}">${valueXml(p, caStateValue(p, vals[p], H, l))}</LKStateSetValue>`);
         }
       }
       return `${I.repeat(3)}<LKState name="${esc(st.name)}">\n${I.repeat(4)}${els.length ? `<elements>\n${els.join('\n')}\n${I.repeat(4)}</elements>` : '<elements/>'}\n${I.repeat(3)}</LKState>`;

@@ -137,6 +137,10 @@ fs.writeFileSync(path.join(OUT, 'anim.gif'), gif);
   const d3 = (await project()).layers.map((x) => x.parallax);
   assert(d3[0] < d3[1] && d3[1] < d3[2] && d3[2] < d3[3], 'nearer layers move more');
   assert.equal((await project()).format, 'modern');
+  // effects: Duo fold on the 3D photo project
+  await pg.click('[data-add="effects"]');
+  await pg.click('.modal-actions button:has-text("Apply")');
+  await pg.waitForFunction(() => window.__studio.store.project.layers.some((x) => x.name === 'Duo fold' && x.anchor.x === 1 && x.gyro.fold > 0), null, { timeout: 60000 });
   // Duo template + postures
   await pg.click('#libBtn');
   await pg.click('.tpl[data-tpl="duo3d"]');
