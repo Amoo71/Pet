@@ -472,3 +472,7 @@ duo-fold.duo-fold { width: 100%; aspect-ratio: auto; height: min(62dvh, 560px); 
   .scrub { width: 64px; }
   .pills.top .icon-pill:nth-child(n+2) { display: none; }
 }
+
+.tilt-val { font-size: 12px; font-weight: 600; color: var(--fg); min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.tilt-wrap .scrub { accent-color: var(--accent); }
+#toasts { top: calc(62px + var(--safe-t)); bottom: auto; }

@@ -120,6 +120,9 @@ function mountTopPills() {
     segmented([['edit', [icon('edit'), el('span', {}, 'Edit')]], ['preview', [icon('play'), el('span', {}, 'Play')]]], () => store.view.mode, (v) => {
       setView({ mode: v, progress: store.view.state === 'Unlock' ? 1 : 0 });
       if (v === 'edit') resetTilt();
+      // on a phone, Play asks for the motion sensor right away (iOS needs this tap)
+      else if (matchMedia('(pointer: coarse)').matches && typeof DeviceOrientationEvent !== 'undefined')
+        enableDeviceMotion().then((ok) => toast(ok ? 'Tilt your phone' : 'Motion sensor not allowed – move over the preview instead', ok ? 'ok' : 'warn'));
     }, 'mode glass-seg')
   );
   bar.append(el('div', { class: 'pill name-pill' }, name), mode);
@@ -144,13 +147,34 @@ function mountStateBar() {
   const clock = ib('clock', 'Clock & UI', () => setView({ clock: !store.view.clock }));
   const motion = ib('gyro', 'Motion sensor', async () => toast((await enableDeviceMotion()) ? 'Tilt your phone' : 'Motion sensor not available', 'info'));
   const posture = persistent(() => segmented([['cover', 'Cover'], ['inner', 'Inner'], ['land', 'Land']], () => store.view.posture || 'inner', (v) => setView({ posture: v }), 'posture glass-seg'));
-  bar.append(seg, scrubWrap, posture);
+  // live 3D tilt strength for gyro-tilted layers (Duo tilt …)
+  const tilted = () => (store.project?.layers || []).filter((l) => l.gyro?.tilt > 0 && !l.gyro?.fold);
+  const tiltVal = el('output', { class: 'tilt-val' });
+  const tilt = el('input', { type: 'range', min: 0, max: 45, step: 1, class: 'scrub', 'aria-label': '3D tilt strength', title: '3D tilt strength' });
+  tilt.addEventListener('input', () => {
+    const v = Math.max(1, Number(tilt.value));
+    update((p) => {
+      for (const l of p.layers) if (l.gyro?.tilt > 0 && !l.gyro.fold) {
+        l.gyro.tilt = v;
+        l.gyro.tiltV = Math.round(v * 0.35);
+      }
+    }, 'tiltStrength');
+  });
+  const tiltWrap = el('label', { class: 'pill scrub-wrap tilt-wrap' }, [icon('gyro'), tilt, tiltVal]);
+  bar.append(seg, scrubWrap, tiltWrap, posture);
   $('#topPills .mode')?.before(el('div', { class: 'pill-row' }, [demo, motion, clock, darkBtn]));
   subscribe(() => {
     runSyncs();
     const p = store.project;
     const modern = p?.format !== 'classic';
-    scrubWrap.hidden = !modern;
+    const tl = modern ? tilted() : [];
+    tiltWrap.hidden = !tl.length;
+    scrubWrap.hidden = !modern || (store.view.mode === 'preview' && tl.length > 0);
+    if (tl.length) {
+      const v = Math.max(...tl.map((l) => l.gyro.tilt));
+      if (document.activeElement !== tilt) tilt.value = v;
+      tiltVal.textContent = `${Math.round(v)}°`;
+    }
     if (document.activeElement !== scrub) scrub.value = store.view.progress ?? (store.view.state === 'Unlock' ? 1 : 0);
     darkBtn.hidden = modern || !p?.appearanceAware;
     darkBtn.replaceChildren(icon(store.view.dark ? 'moon' : 'sun'));

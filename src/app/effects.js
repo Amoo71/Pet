@@ -25,8 +25,7 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 55, shade: 0.4, unlock: true, tilt: 24, strength: 44 };
-DUO_DEFAULTS.shade = 0.6;
+export const DUO_DEFAULTS = { angle: 60, blur: 55, shade: 0.6, unlock: true, tilt: 24, strength: 44 };
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -156,22 +155,26 @@ export async function duoLayers(project, picture, o = DUO_DEFAULTS) {
  * The far-edge look of the iPhone Duo fold, as recreated 1:1 by Mac-Duo
  * (github.com/sumimakito/Mac-Duo, Apache-2.0 – DepthShaders / BlurGradient / DepthTuning):
  *   h      = 0 at the near edge … 1 at the far edge
- *   blur   = maxBlur · (floor + (1 − floor) · h)                 floor 0.15, maxBlur 55 pt
- *   fade   = dimFloor + (1 − dimFloor) · smoothstep(0, reach, h)  dimFloor 0.2, reach 0.9
- *   colour = colour · (1 − maxDim · fade)^2.2                      maxDim 0.6 (Mac-Duo 0.4 … 1.0)
+ *   blur   = maxBlur · smoothstep(0.3, 1, h)^1.35   (Duo ^1.35 curve, only the outer part)
+ *   colour = colour · (1 − maxDim · smoothstep(0.55, 1, h))^2.2   (Mac-Duo dimming)
  * Rendered as a bitmap whose far side is `far` ('left' | 'right').
  */
 function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
   const W = src.width;
   const H = src.height;
-  const floor = o.floor ?? 0.15; // Mac-Duo blurEvenness (DepthTuning 0.4, factory 0)
-  const dimFloor = o.dimFloor ?? 0.2;
-  const reach = o.reach ?? 0.9; // Mac-Duo dimReach (DepthTuning 0.7, factory 0.5)
+  // only the outer part of the far side blurs / darkens – the middle stays clear
+  const blurStart = o.blurStart ?? 0.3;
+  const dimStart = o.dimStart ?? 0.55;
+  const smooth = (e0, e1, x) => {
+    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
   const hAt = (x) => (far === 'left' ? 1 - x / W : x / W);
+  const blurAt = (h) => Math.pow(smooth(blurStart, 1, h), 1.35); // 0…1 of maxBlur (Duo curve ^1.35)
   const out = makeCanvas(W, H);
   const g = out.getContext('2d');
-  // blur pyramid: N levels, each faded in where its radius is reached
-  const N = 6;
+  g.drawImage(src, 0, 0);
+  const N = 10;
   const level = (r) => {
     const c = makeCanvas(W, H);
     const x = c.getContext('2d');
@@ -180,18 +183,15 @@ function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
     x.drawImage(src, -pad, -pad, W + pad * 2, H + pad * 2);
     return c;
   };
-  g.drawImage(level(maxBlur * floor), 0, 0);
-  for (let i = 1; i < N; i++) {
-    const t = i / (N - 1); // blur fraction above the floor this level represents
-    const L = level(maxBlur * (floor + (1 - floor) * t));
-    // visible where h ≥ t (soft ramp of one step)
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    const L = level(maxBlur * t);
     const m = makeCanvas(W, H);
     const mx = m.getContext('2d');
     const grad = mx.createLinearGradient(0, 0, W, 0);
-    for (let k = 0; k <= 20; k++) {
-      const x = k / 20;
-      const h = hAt(x * W);
-      const a = Math.max(0, Math.min(1, (h - (t - 1 / (N - 1))) * (N - 1)));
+    for (let k = 0; k <= 24; k++) {
+      const x = k / 24;
+      const a = Math.max(0, Math.min(1, (blurAt(hAt(x * W)) - (t - 1 / N)) * N));
       grad.addColorStop(x, `rgba(0,0,0,${a.toFixed(3)})`);
     }
     mx.fillStyle = grad;
@@ -200,16 +200,11 @@ function duoFarCopy(src, far, maxBlur, maxDim, o = {}) {
     mx.drawImage(L, 0, 0);
     g.drawImage(m, 0, 0);
   }
-  // dimming
-  const smooth = (e0, e1, x) => {
-    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-  };
+  // dimming towards the far edge: colour · (1 − maxDim·fade)^2.2 (Mac-Duo)
   const dg = g.createLinearGradient(0, 0, W, 0);
   for (let k = 0; k <= 24; k++) {
     const x = k / 24;
-    const fade = dimFloor + (1 - dimFloor) * smooth(0, Math.max(reach, 0.02), hAt(x * W));
-    const keep = Math.pow(1 - maxDim * fade, 2.2);
+    const keep = Math.pow(1 - maxDim * smooth(dimStart, 1, hAt(x * W)), 2.2);
     dg.addColorStop(x, `rgba(0,0,0,${(1 - keep).toFixed(3)})`);
   }
   g.fillStyle = dg;

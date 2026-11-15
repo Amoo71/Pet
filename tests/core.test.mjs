@@ -212,6 +212,9 @@ assert.equal(old.layers[0].anims[0].preset, 'spin');
   const sys = createZip([{ path: 'Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/X/com.apple.posterkit.provider.descriptor.identifier', data: enc.encode('x') }]);
   await assert.rejects(() => rawMorph(sys, ['fx-snow'], {}), (e) => e.code === 'system_only');
   const sys2 = createZip([{ path: 'X/versions/0/contents/com.apple.posterkit.provider.contents.userInfo', data: toBinaryPlist({ appearanceMode: 'Automatic', lookIdentifier: 'colorA' }) }]);
+  const sys3 = createZip([{ path: 'X/com.apple.posterkit.provider.descriptor.identifier', data: enc.encode('v6x.colorC') }]);
+  const t3 = await tuneSystem(sys3, { family: 'v68', look: 'colorB' });
+  assert.equal(text((await readZip(t3.zip)).get('X/com.apple.posterkit.provider.descriptor.identifier')), 'v68.colorB', 'switch to Duo Dunes');
   const t = await tuneSystem(sys2, { look: 'colorD' });
   assert.equal(parsePlist((await readZip(t.zip)).get('X/versions/0/contents/com.apple.posterkit.provider.contents.userInfo')).lookIdentifier, 'colorD');
 }

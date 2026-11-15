@@ -672,7 +672,7 @@ export async function rawMorphFlow(list) {
 
 /** Apple's system-drawn wallpapers: no layers, only the switches iOS itself offers */
 async function systemTuneFlow(list, rm) {
-  const o = { look: '', appearance: '', motion: true };
+  const o = { look: '', appearance: '', motion: true, family: '' };
   const names = list.map((x) => `“${x.name}”`).join(', ');
   const looks = segmented([['', 'Keep'], ...rm.SYSTEM_LOOKS.map((l) => [l, l.replace('color', 'Color ')])], () => o.look, (v) => {
     o.look = v;
@@ -680,9 +680,10 @@ async function systemTuneFlow(list, rm) {
   });
   const choice = await new Promise((resolve) =>
     modal('Built-in iOS wallpaper', [
-      el('p', {}, `${names} ${list.length > 1 ? 'are' : 'is'} drawn by iOS itself (Apple’s newest wallpapers, e.g. iPhone 17e / 18 Pro). The file holds no images or code – only the switches below, which iOS reads.`),
+      el('p', { class: 'muted' }, `${names}: drawn by iOS itself – only these switches exist. “iPhone Duo – Dunes” has the looks A (light) and B (dark).`),
       el('div', { class: 'form' }, [
-        el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Look (colour variant)'), looks]),
+        selectField('Wallpaper', [['', 'Keep'], ...rm.SYSTEM_FAMILIES], () => o.family, (v) => (o.family = v)),
+        el('div', { class: 'field' }, [el('span', { class: 'field-label' }, 'Look'), looks]),
         selectField('Appearance', [['', 'Keep'], ['Automatic', 'Automatic'], ['Light', 'Light (experimental)'], ['Dark', 'Dark (experimental)']], () => o.appearance, (v) => (o.appearance = v)),
         toggleField('Motion (gyro)', () => o.motion, (v) => (o.motion = v)),
       ]),
@@ -696,7 +697,7 @@ async function systemTuneFlow(list, rm) {
   if (choice === 'image') return createProject('blank'), add3DPhoto();
   if (choice !== 'export') return;
   for (const it of list) {
-    const r = await rm.tuneSystem(it.bytes, { look: o.look || undefined, appearance: o.appearance || undefined, motion: o.motion });
+    const r = await rm.tuneSystem(it.bytes, { look: o.look || undefined, appearance: o.appearance || undefined, motion: o.motion, family: o.family || undefined });
     await shareOrDownload(r.zip, `${safeName(it.name)} ✦.tendies`);
   }
   toast('Exported – install the ✦ file with Placard.', 'ok', 5000);

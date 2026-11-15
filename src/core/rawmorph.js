@@ -267,10 +267,20 @@ const LIGHT_POS = { top: [0, 0.36], topLeft: [-0.38, 0.36], topRight: [0.38, 0.3
 
 /** Apple's system-drawn wallpapers (MercuryPoster): the only knobs are the look, appearance and motion. */
 export const SYSTEM_LOOKS = ['colorA', 'colorB', 'colorC', 'colorD'];
-export async function tuneSystem(input, { look, appearance, motion } = {}) {
+/** Mercury wallpaper families seen in Apple's files (descriptor.identifier = "<family>.<look>") */
+export const SYSTEM_FAMILIES = [
+  ['v6x', 'iPhone 17e / 18 Pro'],
+  ['v68', 'iPhone Duo – Dunes'],
+];
+export async function tuneSystem(input, { look, appearance, motion, family } = {}) {
   const files = await readZip(input);
   let n = 0;
   for (const [path, bytes] of files) {
+    if (/provider\.descriptor\.identifier$/.test(path) && (family || look)) {
+      const [fam, lk] = new TextDecoder().decode(bytes).trim().split('.');
+      files.set(path, new TextEncoder().encode(`${family || fam}.${look || lk}`));
+      continue;
+    }
     if (/provider\.contents\.userInfo$/.test(path)) {
       const u = parsePlist(bytes, true);
       if (look) u.lookIdentifier = look;
