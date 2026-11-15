@@ -156,3 +156,34 @@ Anything that moves forever forces full redraws. Tendies Studio warns about loop
 - Liquid Glass, live blur and particles are written exactly like CAPlayground but have little device testing.
 - Light/Dark in ParameterizedCA is not known to work, so it's Classic only.
 - Import reads images, frame sequences, glass, blend/blur, states and parallax; particles, scripts and foreign animations are skipped.
+
+## Apple's own 3D rig (iPhone 17 "Marble" wallpapers, reverse-engineered)
+
+* `BACKGROUND` is a `CATransformLayer` (bounds 0, anchorPoint 0 0, position = screen centre).
+* Each disc strip: `CATransformLayer _MAIN_TRANSFORM_n` → `CATransformLayer _GYRO_TRANSFORM_n` →
+  `CALayer` (anchorPoint `0 0.5`, HEIC contents) with
+  `transform="rotate(-θ, 0, 1, 0) scale(1/cos θ, 1, 1)"` (θ = 11.5°, 45.5°, 63.2°, 75.4°).
+  The width compensation makes the steep strip look flat at rest.
+* Gyro groups rotate the `_GYRO_TRANSFORM` layers: `transform.rotation.y` (axis x, ±0.122 rad) and
+  `transform.rotation.x` (axis y, ±0.06…0.12 rad). Because the strip is already steep, a few
+  degrees change its projected width a lot (cos(θ±δ)/cos θ) – visible without perspective
+  (Apple uses `perspective(-1.29514e+24)`, i.e. orthographic).
+* Gyro rotation must sit on a **CATransformLayer outside** the pre-rotated layer. Inside a plain
+  `CALayer` the rotation is flattened first and stays invisible.
+
+The studio exports gyro tilt / fold the same way: `CATransformLayer "<name> Tilt"` (bounds = screen,
+anchorPoint = the layer's pivot) wraps the layer; `Duo 3D tilt` builds two pre-rotated halves
+hinged on the centre line (`sx` = 1/cos θ) plus blurred copies that fade in on the side turning away.
+Project perspective 0 = orthographic (no `sublayerTransform`).
+
+## Apple's newest wallpapers (iPhone 17e / 18 Pro packs)
+
+`Container/Library/Application Support/PRBPosterExtensionDataStore/61/Extensions/com.apple.MercuryPoster/descriptors/<UUID>/`
+holds only metadata plists (providerInfo, descriptor.identifier, suggestionMetadata, …) – no
+`.wallpaper`, no CAML. iOS renders them itself, so nothing can be added to their contents.
+
+## Raw morph
+
+For Apple's own ParameterizedCA wallpapers (HEIC, nested 3D rigs) Morph does not rebuild the
+wallpaper: it keeps every file byte-for-byte and only inserts overlay layers (particles,
+vignette) into the `FLOATING` group of the existing `main.caml` (`src/core/rawmorph.js`).

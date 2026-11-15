@@ -507,7 +507,7 @@ function projectPanel() {
         duo: 'Duo (iPhone Duo foldable, iOS 27): your square scene is framed separately for the cover screen and the inner display (portrait + landscape), with gyro and depth.',
         classic: 'Classic (iOS 17+): three LayeredAnimation bundles with spring transitions and Light/Dark states. Loses gyro on iOS 27.',
       }[p.format || 'modern']),
-      modern ? numField('3D perspective', () => store.project.perspective || 900, (v) => P((pp) => (pp.perspective = Math.max(100, v)), 'persp'), { min: 200, max: 3000, step: 10, slider: true, unit: 'pt' }) : null,
+      modern ? numField('3D perspective (0 = flat, Apple style)', () => store.project.perspective ?? 900, (v) => P((pp) => (pp.perspective = v < 100 ? 0 : v), 'persp'), { min: 0, max: 3000, step: 10, slider: true, unit: 'pt' }) : null,
       !modern ? toggleField('Light / Dark variants', () => store.project.appearanceAware, (v) => P((pp) => (pp.appearanceAware = v)), 'Adds Locked/Unlock/Sleep Light & Dark states') : null,
     ]),
     !modern ? section('Default spring', transitionFields(() => store.project.transition, (fn) => P((pp) => fn(pp.transition), 'ptr'))) : null,

@@ -35,7 +35,14 @@ export async function importTendies(buf, storeAsset) {
   const dec = new TextDecoder();
   let wallpapers = paths.filter((p) => /\.wallpaper\/Wallpaper\.plist$/i.test(p));
   if (!wallpapers.length) {
-    if (!paths.some((p) => /\.ca\/main\.caml$/i.test(p))) throw new Error('No PosterBoard wallpaper found in this file.');
+    if (!paths.some((p) => /\.ca\/main\.caml$/i.test(p))) {
+      if (paths.some((p) => /provider\.descriptor\.identifier$/.test(p))) {
+        const e = new Error('This is a built-in iOS wallpaper: the file only points to a wallpaper iOS draws itself, it contains no images or layers to edit.');
+        e.code = 'system_only';
+        throw e;
+      }
+      throw new Error('No PosterBoard wallpaper found in this file.');
+    }
     wallpapers = [null];
   }
   const projects = [];
@@ -133,7 +140,7 @@ export async function importTendies(buf, storeAsset) {
             const blur = [...nextChain].reverse().map((c) => c.el.querySelector(':scope > filters > [filter="gaussianBlur"]')?.getAttribute('inputRadius')).find(Boolean);
             Object.assign(layer, {
               plane: pl,
-              name: (name && !/ (Content|Rim)$/.test(name) ? name : nextChain.map((c) => c.name).find((n) => n && !/^(BACKGROUND|FLOATING|FOREGROUND|Root Layer)$/.test(n) && !/ (Parallax|Anim \d+|Content|Rim)$/.test(n))) || layer.name,
+              name: (name && !/ (Content|Rim)$/.test(name) ? name : nextChain.map((c) => c.name).find((n) => n && !/^(BACKGROUND|FLOATING|FOREGROUND|Root Layer)$/.test(n) && !/ (Parallax( 2)?|Anim \d+|Content|Rim|Tilt|Fade|GyroFade)$/.test(n))) || layer.name,
               x: cx,
               y: H - cy,
               w: w || proj._w,
@@ -217,7 +224,20 @@ export async function importTendies(buf, storeAsset) {
         }
         for (const d of style.querySelectorAll(':scope > wallpaperParallaxGroups > NSDictionary')) {
           const n = Math.max(Math.abs(Number(val(d, 'mapMaxTo')) || 0), Math.abs(Number(val(d, 'mapMinTo')) || 0));
-          for (const { layer } of byName.get(val(d, 'layerName')) || []) layer.parallax = Math.max(layer.parallax || 0, n);
+          const kp = val(d, 'keyPath') || '';
+          const ln = val(d, 'layerName') || '';
+          if (kp.startsWith('transform.rotation') && / Tilt$/.test(ln)) {
+            // gyro tilt (our "<name> Tilt" rig): radians → degrees
+            const deg = Math.round((n * 180) / Math.PI * 10) / 10;
+            for (const { layer } of byName.get(ln) || []) {
+              layer.gyro ||= { tilt: 0, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 };
+              if (kp === 'transform.rotation.y') layer.gyro.tilt = Math.max(layer.gyro.tilt || 0, deg);
+              else layer.gyro.tiltV = deg;
+            }
+            continue;
+          }
+          if (!kp.startsWith('transform.translation')) continue;
+          for (const { layer } of byName.get(ln) || []) layer.parallax = Math.max(layer.parallax || 0, n);
         }
       }
     }

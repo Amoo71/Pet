@@ -6,6 +6,8 @@ import { getDevice, guessDevice } from '../core/devices.js';
 import { addImageFile, addAsset, addGifBytes, exportRender, ensureFont } from './assets.js';
 import { extractFrames, probeVideo, FRAME_LIMIT } from '../browser/video.js';
 import { importTendies } from '../browser/importer.js';
+import { readZip } from '../core/zip.js';
+import { renderParticleCanvas, canvasToBlob, makeCanvas } from '../browser/raster.js';
 import { listProjects, getProject, saveProject } from '../browser/storage.js';
 import { searchGifs, getSearchSettings, setSearchSettings, PROVIDERS } from '../browser/gifsearch.js';
 import { el, pickFiles, toast, modal, progressModal, shareOrDownload, numField, toggleField, selectField, textField, segmented, button } from './dom.js';
@@ -454,6 +456,8 @@ export async function openBrowse(initial = 'apple') {
     try {
       const bytes = await cat.downloadTendies(w.url, (got, total) => pm.set(got, total, `${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`), pm.signal);
       pm.close();
+      const rm = await import('../core/rawmorph.js');
+      if (morph && (await rm.prefersRawMorph(bytes))) return rawMorphFlow([{ name: w.name, bytes }]);
       const file = new File([bytes], `${w.name}.tendies`);
       const projects = await importTendiesFile(file);
       if (morph && projects?.length) await openEffects();
@@ -472,7 +476,8 @@ function effectsForm(state) {
   state.ids ||= new Set(state.applied?.length ? state.applied : ['duotilt']);
   state.duo ||= { ...DUO_DEFAULTS };
   const duoOpts = el('div', { class: 'form duo-opts' }, [
-    numField('3D strength', () => state.duo.strength, (v) => (state.duo.strength = v), { min: 10, max: 90, step: 1, slider: true, unit: 'pt' }),
+    numField('3D strength', () => state.duo.strength, (v) => (state.duo.strength = v), { min: 0, max: 80, step: 1, slider: true }),
+    numField('Tilt range', () => state.duo.tilt, (v) => (state.duo.tilt = v), { min: 2, max: 20, step: 1, slider: true, unit: '°' }),
     numField('Fold angle', () => state.duo.angle, (v) => (state.duo.angle = v), { min: 15, max: 90, step: 1, slider: true, unit: '°' }),
     numField('Edge blur', () => state.duo.blur, (v) => (state.duo.blur = v), { min: 0, max: 60, step: 1, slider: true, unit: 'pt' }),
     numField('Edge shade', () => state.duo.shade, (v) => (state.duo.shade = v), { min: 0, max: 0.9, step: 0.02, slider: true }),
@@ -488,7 +493,7 @@ function effectsForm(state) {
     return b;
   }));
   duoOpts.hidden = !state.ids.has('duo') && !state.ids.has('duotilt');
-  return [state.applied?.length ? el('p', { class: 'muted' }, 'Highlighted = already on this wallpaper. Tap one to turn it off, then Apply.') : null, grid, duoOpts, el('p', { class: 'muted' }, 'Duo fold, 3D tilt and gyro fade use gyro key paths beyond plain translation – experimental on device. Gyro needs the Modern format, effects switch to it automatically.')];
+  return [state.applied?.length ? el('p', { class: 'muted' }, 'Highlighted = already on this wallpaper. Tap one to turn it off, then Apply.') : null, grid, duoOpts, el('p', { class: 'muted' }, 'Duo 3D tilt uses the same gyro rig as Apple’s own 3D wallpapers (rotating transform layer + steep pre-rotated halves). Gyro needs the Modern format – effects switch to it automatically.')];
 }
 
 export async function openEffects() {
@@ -514,17 +519,36 @@ export async function openEffects() {
 export async function morphTendies() {
   const files = await pickFiles('.tendies,.zip,application/zip,application/octet-stream', true);
   if (!files.length) return;
+  const rm = await import('../core/rawmorph.js');
+  const raw = [];
+  const editable = [];
+  for (const f of files) {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const name = f.name.replace(/\.(tendies|zip)$/i, '');
+    let r = false;
+    try {
+      r = await rm.prefersRawMorph(bytes);
+    } catch {
+      /* not a zip – let the importer report it */
+    }
+    (r ? raw : editable).push({ name, bytes });
+  }
+  if (editable.length) await morphEditable(editable);
+  if (raw.length) await rawMorphFlow(raw);
+}
+
+async function morphEditable(list) {
   const mod = await import('./effects.js');
   const state = { mod };
-  const go = await new Promise((resolve) => modal(`Morph ${files.length} wallpaper${files.length > 1 ? 's' : ''}`, [el('p', {}, 'Pick the effects to add to every imported wallpaper. The originals stay untouched; morphed copies are saved to your library.'), ...effectsForm(state)], [['Cancel', (c) => (c(), resolve(false))], ['Morph', (c) => (c(), resolve(true)), 'primary']]));
+  const go = await new Promise((resolve) => modal(`Morph ${list.length} wallpaper${list.length > 1 ? 's' : ''}`, [el('p', {}, 'Pick the effects to add to every imported wallpaper. The originals stay untouched; morphed copies are saved to your library.'), ...effectsForm(state)], [['Cancel', (c) => (c(), resolve(false))], ['Morph', (c) => (c(), resolve(true)), 'primary']]));
   if (!go) return;
   const pm = progressModal('Morphing…');
   const results = [];
   try {
-    for (let i = 0; i < files.length; i++) {
-      pm.set(i, files.length, `${files[i].name} (${i + 1}/${files.length})`);
-      const { projects, warnings } = await importTendies(await files[i].arrayBuffer(), (blob) => addAsset(blob));
-      for (const w of warnings.slice(0, 2)) toast(`${files[i].name}: ${w}`, 'warn', 5000);
+    for (let i = 0; i < list.length; i++) {
+      pm.set(i, list.length, `${list[i].name} (${i + 1}/${list.length})`);
+      const { projects, warnings } = await importTendies(list[i].bytes, (blob) => addAsset(blob));
+      for (const w of warnings.slice(0, 2)) toast(`${list[i].name}: ${w}`, 'warn', 5000);
       for (const proj of projects) {
         const d = getDevice(proj.device);
         proj._w = d.w;
@@ -546,6 +570,79 @@ export async function morphTendies() {
         ['Export all as collection', (c) => (c(), exportCollection(results.map((r) => r.id))), 'primary'],
       ]);
     else toast('Morphed copy saved – preview it, then Export.', 'ok', 5000);
+  } catch (e) {
+    pm.close();
+    console.error(e);
+    toast(`Morph failed: ${e.message}`, 'error', 6000);
+  }
+}
+
+/** PNG bytes for the raw-morph overlay assets */
+const rawAssets = () => ({
+  particle: async (kind) => new Uint8Array(await (await canvasToBlob(renderParticleCanvas(kind))).arrayBuffer()),
+  vignette: async () => {
+    const c = makeCanvas(402, 874);
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(201, 437, 0, 201, 437, Math.hypot(201, 437));
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.7)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 402, 874);
+    return new Uint8Array(await (await canvasToBlob(c)).arrayBuffer());
+  },
+});
+
+/**
+ * Morph Apple's own (and other complex) wallpapers in place: the original package is kept
+ * byte-for-byte, only overlay layers (particles, vignette) are added to its Core Animation file.
+ */
+export async function rawMorphFlow(list) {
+  const rm = await import('../core/rawmorph.js');
+  const mod = await import('./effects.js');
+  // system-rendered wallpapers can't be extended – say so and offer the image route
+  const usable = [];
+  const system = [];
+  for (const it of list) (rm.inspectPackage(await readZip(it.bytes)).systemOnly ? system : usable).push(it);
+  if (system.length) {
+    const names = system.map((x) => `“${x.name}”`).join(', ');
+    await new Promise((resolve) =>
+      modal('Built-in iOS wallpaper', [
+        el('p', {}, `${names} ${system.length > 1 ? 'are' : 'is'} drawn by iOS itself (Apple’s newest wallpapers, e.g. for iPhone 17e / 18 Pro, ship only a pointer to the system wallpaper – no images or layers). There is nothing inside to add effects to.`),
+        el('p', { class: 'muted' }, 'Tip: save the wallpaper as an image (screenshot of the Lock Screen without clock, or Apple’s press image) and use it with 3D photo or + Effects – that gives you Duo tilt, snow and everything else.'),
+      ], [
+        ['OK', (c) => (c(), resolve())],
+        ['Use an image instead', (c) => (c(), resolve(), createProject('blank'), add3DPhoto()), 'primary'],
+      ])
+    );
+  }
+  if (!usable.length) return;
+  const EFFECTS = mod.EFFECTS.filter((f) => rm.RAW_CAPABLE(f.id));
+  const state = { mod: { ...mod, EFFECTS }, ids: new Set(['fx-snow']) };
+  const go = await new Promise((resolve) =>
+    modal(`✨ Morph ${usable.length > 1 ? `${usable.length} wallpapers` : `“${usable[0].name}”`}`, [
+      el('p', {}, 'This is one of Apple’s own wallpapers (or uses Apple’s 3D rig). It is kept 100 % original – its HEIC images, 3D layers and gyro stay untouched – and the effects are layered on top.'),
+      ...effectsForm(state).slice(1, 2),
+      el('p', { class: 'muted' }, 'Duo tilt / fold need editable layers, so they are offered for your own and community wallpapers. Apple’s marble wallpapers already tilt with the gyro.'),
+    ], [['Cancel', (c) => (c(), resolve(false))], ['Morph & export', (c) => (c(), resolve(true)), 'primary']])
+  );
+  if (!go) return;
+  const ids = [...state.ids].filter(rm.RAW_CAPABLE);
+  if (!ids.length) return toast('Pick at least one effect.', 'warn');
+  const pm = progressModal('Morphing…');
+  try {
+    const assets = rawAssets();
+    const out = [];
+    for (let i = 0; i < usable.length; i++) {
+      pm.set(i, usable.length, usable[i].name);
+      const r = await rm.rawMorph(usable[i].bytes, ids, assets);
+      out.push({ name: usable[i].name, ...r });
+    }
+    pm.close();
+    for (const o of out) await shareOrDownload(o.zip, `${safeName(o.name)} ✦.tendies`);
+    const n = out.reduce((a, o) => a + o.wallpapers, 0);
+    toast(`Added ${ids.length} effect${ids.length > 1 ? 's' : ''} to ${n} wallpaper${n > 1 ? 's' : ''} – install the ✦ file with Placard.`, 'ok', 6000);
+    store.lastRawMorph = out.map((o) => ({ name: o.name, size: o.zip.length, wallpapers: o.wallpapers, changed: o.changed }));
   } catch (e) {
     pm.close();
     console.error(e);
@@ -772,7 +869,8 @@ export async function importTendiesFile(file) {
     return projects;
   } catch (e) {
     pm.close();
-    toast(`Import failed: ${e.message}`, 'error', 6000);
+    if (e.code === 'system_only') rawMorphFlow([{ name: file.name.replace(/\.(tendies|zip)$/i, ''), bytes: new Uint8Array(await file.arrayBuffer()) }]);
+    else toast(`Import failed: ${e.message}`, 'error', 6000);
     return null;
   }
 }

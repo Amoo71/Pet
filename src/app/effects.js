@@ -15,7 +15,7 @@ import { makeCanvas, canvasToBlob } from '../browser/raster.js';
 const PARTICLES = ['snow', 'rain', 'sparkle', 'stars', 'bubbles', 'embers', 'petals', 'confetti'];
 
 export const EFFECTS = [
-  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'Strong 3D perspective tilt with the gyro; a blurred, darker edge slides in on the side that tips away. Uses only device-verified gyro movement.' },
+  { id: 'duotilt', icon: '📱', name: 'Duo 3D tilt', desc: 'Real 3D tilt built like Apple’s own 3D wallpapers: the picture swings on the centre line with the gyro, the side that turns away blurs and darkens.' },
   { id: 'duo', icon: '📖', name: 'Duo fold', desc: 'iPhone Duo fold: the left half folds on its hinge as you tilt (blur + shade follow).' },
   { id: 'depth', icon: '🧊', name: 'Depth parallax', desc: 'Gives every layer gyro parallax – back layers move less, front layers more.' },
   { id: 'unlockZoom', icon: '🔍', name: 'Unlock zoom', desc: 'Background pushes in while you swipe up.' },
@@ -25,7 +25,7 @@ export const EFFECTS = [
   ...PARTICLES.map((k) => ({ id: `fx-${k}`, icon: { snow: '❄️', rain: '🌧️', sparkle: '✨', stars: '⭐', bubbles: '🫧', embers: '🔥', petals: '🌸', confetti: '🎉' }[k], name: EMITTER_PRESETS[k].name, desc: 'Particles (animate forever – uses more battery).' })),
 ];
 
-export const DUO_DEFAULTS = { angle: 60, blur: 22, shade: 0.52, unlock: true, tilt: 14, strength: 44 };
+export const DUO_DEFAULTS = { angle: 60, blur: 22, shade: 0.52, unlock: true, tilt: 12, strength: 44 };
 
 const tag = (layers, fx) => layers.map((l) => Object.assign(l, { fx }));
 
@@ -152,142 +152,109 @@ export async function duoLayers(project, picture, o = DUO_DEFAULTS) {
  * opaque at the outer edge and fading inward. It sits just outside the screen
  * and slides in with gyro translation (the only gyro key path verified on device).
  */
-function sideStrip(pic, radius, side, shade, frac) {
-  const PW = pic.width;
-  const PH = pic.height;
-  const sw = Math.round(PW * frac);
-  const c = makeCanvas(sw, PH);
-  const x = c.getContext('2d');
-  const pad = radius * 2;
-  x.filter = `blur(${radius}px)`;
-  // the screen edge of the picture, mirrored outwards so the strip continues the image
-  const sx = side === 'left' ? 0 : PW - sw;
-  x.drawImage(pic, sx, 0, sw, PH, -pad, -pad, sw + pad * 2, PH + pad * 2);
-  x.filter = 'none';
-  x.fillStyle = `rgba(0,0,0,${shade})`;
-  x.fillRect(0, 0, sw, PH);
-  const g = side === 'left' ? x.createLinearGradient(0, 0, sw, 0) : x.createLinearGradient(sw, 0, 0, 0);
-  g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.55, 'rgba(0,0,0,0.75)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  x.globalCompositeOperation = 'destination-in';
+/** half of the picture whose outer edge is progressively blurred and shaded */
+function edgeBlurHalf(half, radius, outer, shade) {
+  const W = half.width;
+  const H = half.height;
+  // progressiveBlur blurs towards the left edge – mirror for a right half
+  const flip = (c) => {
+    const o = makeCanvas(c.width, c.height);
+    const x = o.getContext('2d');
+    x.translate(c.width, 0);
+    x.scale(-1, 1);
+    x.drawImage(c, 0, 0);
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    return o;
+  };
+  const out = outer === 'left' ? progressiveBlur(half, radius) : flip(progressiveBlur(flip(half), radius));
+  // shade: none at the centre line → `shade` at the outer edge
+  const x = out.getContext('2d');
+  const g = outer === 'left' ? x.createLinearGradient(W, 0, 0, 0) : x.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(0.4, `rgba(0,0,0,${shade * 0.25})`);
+  g.addColorStop(1, `rgba(0,0,0,${shade})`);
   x.fillStyle = g;
-  x.fillRect(0, 0, sw, PH);
-  return c;
-}
-
-/** one tile of the picture with feathered (overlapping) inner edges */
-function tileCanvas(pic, rx, ry, rw, rh, feather, edges) {
-  const c = makeCanvas(Math.round(rw), Math.round(rh));
-  const x = c.getContext('2d');
-  x.drawImage(pic, rx, ry, rw, rh, 0, 0, c.width, c.height);
-  x.globalCompositeOperation = 'destination-in';
-  const W = c.width;
-  const H = c.height;
-  const f = feather;
-  const h = x.createLinearGradient(0, 0, W, 0);
-  h.addColorStop(0, edges.left ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
-  h.addColorStop(Math.min(0.49, f / W), 'rgba(0,0,0,1)');
-  h.addColorStop(Math.max(0.51, 1 - f / W), 'rgba(0,0,0,1)');
-  h.addColorStop(1, edges.right ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
-  x.fillStyle = h;
   x.fillRect(0, 0, W, H);
-  const v = x.createLinearGradient(0, 0, 0, H);
-  v.addColorStop(0, edges.top ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
-  v.addColorStop(Math.min(0.49, f / H), 'rgba(0,0,0,1)');
-  v.addColorStop(Math.max(0.51, 1 - f / H), 'rgba(0,0,0,1)');
-  v.addColorStop(1, edges.bottom ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
-  x.fillStyle = v;
-  x.fillRect(0, 0, W, H);
-  return c;
+  return out;
 }
 
 /**
- * Duo 3D tilt, built only from gyro translation (device-verified):
- *  - the picture is cut into a grid of feathered, overlapping tiles; each tile moves
- *    the way its point would move if the picture rotated in 3D (perspective):
- *      tilt x → dx = -A·u²,  dy = -B·u·v      tilt y → dy = -A·v²,  dx = -B·u·v
- *    (u, v = tile centre from -1…1). Near side grows, far side shrinks – it looks tilted.
- *  - blurred, darkened side strips wait just off screen and slide in on the side
- *    that tips away.
+ * Duo 3D tilt – built like Apple's own 3D wallpapers (reverse-engineered from the
+ * iPhone 17 "Marble" .tendies, see docs/FORMAT.md):
+ *   * the picture is split at the screen centre into a left and a right half;
+ *   * each half hangs on the centre line (anchorPoint 0/1, 0.5) and is pre-rotated
+ *     steeply about Y (±θ₀) with its width scaled by 1/cos θ₀, so at rest it looks flat;
+ *   * a gyro CATransformLayer around it adds ±δ of rotation.y. Because the half is
+ *     already steep, a few degrees change its projected width a lot:
+ *     width = cos(θ₀ ∓ δ)/cos θ₀ – one half swings away, the other comes forward.
+ *     This is visible even without perspective (Apple's rig is orthographic too);
+ *   * a blurred + shaded copy of each half fades in as that half swings away,
+ *     and a blurred, darker backdrop shows at the screen edge – the Duo edge blur.
  */
 export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const W = project._w;
   const H = project._h;
   const scale = 2;
-  const A = o.strength ?? 44; // pt at the edges
-  const B = A * 0.55;
-  const k = 1 + (2 * A + 24) / Math.min(W, H); // picture enlarged so moving tiles never show the screen edge
+  const theta = Math.max(20, Math.min(76, 32 + (o.strength ?? 44) * 0.55)); // pre-rotation °
+  const delta = Math.max(2, Math.min(20, o.tilt ?? 12)); // gyro swing °
+  const sx = 1 / Math.cos((theta * Math.PI) / 180);
+  const k = 1.08; // a little bleed above / below and at the outer edges
   const src = await compositeLayers(project, [...project.layers.filter((l) => l.plane === 'background'), ...project.layers.filter((l) => l.plane !== 'background')].filter((l) => !l.fx), scale);
-  // enlarged picture (W·k × H·k) centred on the screen
   const PW = Math.round(W * k * scale);
   const PH = Math.round(H * k * scale);
   const pic = makeCanvas(PW, PH);
   pic.getContext('2d').drawImage(src, 0, 0, PW, PH);
-  const cols = o.cols || 6;
-  const rows = o.rows || 8;
-  const ovl = 10 * scale; // overlap in px on each inner side
-  const layers = [];
-  layers.push(newLayer('color', project, { name: 'Duo tilt backdrop', color: '#000000', plane: 'background' }));
-  layers.push(newLayer('image', project, { name: 'Duo tilt base', asset: await canvasAsset(pic, 'image/jpeg', 0.88), w: Math.round(W * k), h: Math.round(H * k), fit: 'stretch', plane: 'background' }));
-  const tw = PW / cols;
-  const th = PH / rows;
-  for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) {
-      const edges = { left: i === 0, right: i === cols - 1, top: j === 0, bottom: j === rows - 1 };
-      const rx = Math.max(0, i * tw - (edges.left ? 0 : ovl));
-      const ry = Math.max(0, j * th - (edges.top ? 0 : ovl));
-      const rw = Math.min(PW, (i + 1) * tw + (edges.right ? 0 : ovl)) - rx;
-      const rh = Math.min(PH, (j + 1) * th + (edges.bottom ? 0 : ovl)) - ry;
-      const tile = tileCanvas(pic, rx, ry, rw, rh, ovl * 2, edges);
-      // tile centre relative to the screen centre, normalised to the screen half size
-      const cxp = (rx + rw / 2) / scale - (W * k) / 2;
-      const cyp = (ry + rh / 2) / scale - (H * k) / 2;
-      const u = cxp / (W / 2);
-      const v = cyp / (H / 2);
-      layers.push(
-        newLayer('image', project, {
-          name: `Duo tilt ${j + 1}-${i + 1}`,
-          asset: await canvasAsset(tile),
-          x: W / 2 + cxp,
-          y: H / 2 + cyp,
-          w: Math.round(rw / scale),
-          h: Math.round(rh / scale),
-          fit: 'stretch',
-          plane: 'background',
-          gyroMoves: [
-            { axis: 'x', key: 'x', n: -A * u * u },
-            { axis: 'x', key: 'y', n: -B * u * v },
-            { axis: 'y', key: 'y', n: -A * v * v },
-            { axis: 'y', key: 'x', n: -B * u * v },
-          ],
-        })
-      );
-    }
+  const blurR = Math.max(6, (o.blur ?? 22) * scale);
+  const shade = o.shade ?? 0.52;
+  // backdrop: blurred, darker copy – what you see at the edge when a half swings away
+  const back = makeCanvas(W * scale, H * scale);
+  {
+    const x = back.getContext('2d');
+    x.filter = `blur(${blurR * 1.6}px)`;
+    const pad = blurR * 3;
+    x.drawImage(src, -pad, -pad, back.width + pad * 2, back.height + pad * 2);
+    x.filter = 'none';
+    x.fillStyle = `rgba(0,0,0,${Math.min(0.8, shade * 0.9)})`;
+    x.fillRect(0, 0, back.width, back.height);
   }
-  // side strips: rest just outside the screen, slide in on the side that tips away
-  const frac = 0.34;
-  const r = Math.max(6, (o.blur ?? 22) * scale);
-  const sw = W * frac;
-  const N = Math.round(sw * 0.9);
+  const layers = [];
+  layers.push(newLayer('image', project, { name: 'Duo tilt backdrop', asset: await canvasAsset(back, 'image/jpeg', 0.85), w: Math.round(W * 1.1), h: Math.round(H * 1.1), fit: 'stretch', plane: 'background', parallax: 10 }));
+  const ov = 2; // pt of overlap across the centre line – hides the seam
   for (const side of ['left', 'right']) {
+    const hw = Math.round((W * k) / 2);
+    const w = hw + ov;
+    const half = makeCanvas(w * scale, PH);
+    half.getContext('2d').drawImage(pic, side === 'left' ? 0 : -(PW / 2 - ov * scale), 0);
+    const geo = {
+      // x/y = layer centre; the anchor sits exactly on the centre line
+      x: side === 'left' ? W / 2 + ov - w / 2 : W / 2 - ov + w / 2,
+      y: H / 2,
+      w,
+      h: Math.round(H * k),
+      fit: 'stretch',
+      plane: 'background',
+      anchor: { x: side === 'left' ? hw / w : ov / w, y: 0.5 },
+      rotY: side === 'left' ? theta : -theta,
+      sx,
+    };
+    const L = side === 'left' ? 'L' : 'R';
+    layers.push(newLayer('image', project, { ...geo, name: `Duo tilt ${L}`, asset: await canvasAsset(half, 'image/jpeg', 0.9), gyro: { tilt: delta, tiltV: delta * 0.25, fold: 0, fade: 'none', fadeMin: 0, fadeMax: 1 } }));
+    // tilting right (+x) turns the left half away, tilting left the right half
     layers.push(
       newLayer('image', project, {
-        name: `Duo tilt blur ${side === 'left' ? 'L' : 'R'}`,
-        asset: await canvasAsset(sideStrip(src, r, side, (o.shade ?? 0.52) * 0.7, frac)),
-        x: side === 'left' ? -sw / 2 : W + sw / 2,
-        y: H / 2,
-        w: Math.round(sw),
-        h: H,
-        fit: 'stretch',
-        plane: 'background',
-        // right strip enters (moves left) when tilting right, left strip enters when tilting left
-        gyroMoves: [{ axis: 'x', key: 'x', n: -N }],
+        ...geo,
+        name: `Duo tilt ${L} blur`,
+        asset: await canvasAsset(edgeBlurHalf(half, blurR, side, shade)),
+        gyro: { tilt: delta, tiltV: delta * 0.25, fold: 0, fade: side === 'left' ? 'x' : '-x', fadeMin: -1, fadeMax: 1 },
       })
     );
   }
-  if (o.unlock) for (const l of layers) l.states = { Unlock: { scale: 1.04 }, Sleep: { opacity: 0.6 } };
-  return { layers, hideOthers: true };
+  if (o.unlock) {
+    layers[0].states = { Unlock: { scale: 1.06 }, Sleep: { opacity: 0.6 } };
+    for (const l of layers.slice(1)) l.states = { Sleep: { opacity: 0.6 } };
+  }
+  // the rig is orthographic like Apple's: a scene perspective would distort the steep halves
+  return { layers, hideOthers: true, orthographic: true };
 }
 
 /**
@@ -314,6 +281,10 @@ export async function prepareEffects(project, ids, opts = {}) {
       if (want.has(fx)) continue;
       p.layers = p.layers.filter((l) => l.fx !== fx);
       for (const [id, prev] of Object.entries(p.fxApplied[fx] || {})) {
+        if (id === '__project') {
+          Object.assign(p, prev);
+          continue;
+        }
         const l = p.layers.find((x) => x.id === id);
         if (l) Object.assign(l, prev);
       }
@@ -359,6 +330,8 @@ export async function prepareEffects(project, ids, opts = {}) {
         l.hidden = true;
       }
       p.layers.unshift(...added.duotilt);
+      // orthographic like Apple's rig (perspective 0 = none); restored on removal
+      p.fxApplied.duotilt.__project = { perspective: p.perspective };
       done.push('+ Duo 3D tilt');
     }
     if (added.duo) {
@@ -368,7 +341,7 @@ export async function prepareEffects(project, ids, opts = {}) {
     }
     if (added.duo || added.duotilt) {
       if (p.format === 'classic') p.format = 'modern';
-      p.perspective = Math.min(p.perspective || 900, 700);
+      p.perspective = added.duotilt || (have.has('duotilt') && want.has('duotilt')) ? 0 : Math.min(p.perspective || 900, 700);
     }
     if (want.has('vignette') && !have.has('vignette')) {
       p.layers.push(Object.assign(newLayer('gradient', p, { name: 'Vignette', plane: 'floating', gradient: { type: 'radial', angle: 0, stops: [{ c: '#00000000', p: 0.55 }, { c: '#000000b3', p: 1 }] } }), { fx: 'vignette' }));
