@@ -75,7 +75,10 @@ export function memoryEstimate(project) {
     if (l.hidden) continue;
     const s = 9; // @3x
     const frames = l.kind === 'video' ? Math.min(l.video?.frames?.length || 1, 400) : 1;
-    px += l.w * l.h * s * frames;
+    const k = Math.max(l.scale || 1, ...Object.values(l.states || {}).map((st) => st.scale || 0));
+    // the export never writes more than 4096 px per side
+    const w = Math.min(4096, l.w * k * 3), h = Math.min(4096, l.h * k * 3);
+    px += ((w * h) / s) * s * frames;
   }
   return (px * 4) / 1024 / 1024;
 }
@@ -106,7 +109,8 @@ export function validateProject(project) {
   if (loops.length)
     issues.push({ level: 'warn', msg: `${loops.length} layer(s) animate forever – the screen redraws every frame (measured ~30% vs ~4% CPU idle). Prefer swipe-driven state animation for battery life.`, kind: 'battery' });
   const mem = memoryEstimate(project);
-  if (mem > 120) issues.push({ level: 'warn', msg: `≈${Math.round(mem)} MB decoded image memory – may stutter on older iPhones (aim for < 80 MB).` });
+  if (mem > 150) issues.push({ level: 'warn', msg: '⚠️ ' + `≈${Math.round(mem)} MB image memory – PosterBoard can crash (respring loop). Make layers smaller, hide or remove some (aim for < 80 MB).` });
+  else if (mem > 90) issues.push({ level: 'warn', msg: `≈${Math.round(mem)} MB image memory – may crash or stutter on some iPhones (aim for < 80 MB).` });
   const bg = project.layers.filter((l) => l.plane === 'background' && !l.hidden);
   if (project.layers.length && !bg.length) issues.push({ level: 'warn', msg: 'No visible layer behind the clock – parts of the lock screen would be black.' });
   // Always-On has no depth effect: anything in front of the clock region is drawn under the clock
@@ -124,7 +128,12 @@ export function validateProject(project) {
 /** Resolve layer bitmaps through the render callback into package paths. */
 async function collectResources(project, render, caDir, add) {
   const resources = new Map();
+  const byAsset = new Map(); // the same picture on several layers is stored (and decoded) once
   for (const layer of project.layers) {
+    if (layer.kind === 'image' && layer.asset && byAsset.has(layer.asset)) {
+      resources.set(layer.id, byAsset.get(layer.asset));
+      continue;
+    }
     const r = await render(layer, project);
     if (!r) continue;
     if (r.frames) {
@@ -139,6 +148,7 @@ async function collectResources(project, render, caDir, add) {
       const p = `assets/${layer.id}.${r.ext}`;
       add(`${caDir}/${p}`, r.bytes);
       resources.set(layer.id, { file: p });
+      if (layer.kind === 'image' && layer.asset) byAsset.set(layer.asset, { file: p });
     }
   }
   return resources;
@@ -296,7 +306,9 @@ export async function buildTendies(projects, render, opts = {}) {
   const ordered = list.length > 1 && opts.ordered !== false && list.every((p) => p.format === 'classic');
   const baseId = 10000 + Math.floor(Math.random() * 80000);
   for (let i = 0; i < list.length; i++) {
-    const { files } = await buildDescriptor(list[i], render, { root: ordered ? 'ordered-descriptors' : 'descriptors', wallpaperId: baseId + (list.length - i), salt: String(i) });
+    // hidden layers can never show (no state un-hides them) – don't make iOS load them
+    const visibleOnly = { ...list[i], layers: list[i].layers.filter((l) => !l.hidden) };
+    const { files } = await buildDescriptor(visibleOnly, render, { root: ordered ? 'ordered-descriptors' : 'descriptors', wallpaperId: baseId + (list.length - i), salt: String(i) });
     all.push(...files);
   }
   return createZip(all);

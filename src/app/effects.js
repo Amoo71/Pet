@@ -255,8 +255,11 @@ export async function duoTiltLayers(project, o = DUO_DEFAULTS) {
   const layers = [newLayer('color', project, { name: 'Duo black', color: '#000000', plane: 'background' })];
   for (const [side, hinge, dir] of [['R', 'left', 1], ['L', 'right', -1]]) {
     layers.push(newLayer('image', project, { ...geo(hinge), name: `Duo ${side}`, asset: picAsset, gyro: gy(zr(dir * K, EPS)) }));
+    // blurred copies need no full resolution: half size → a quarter of the memory each
+    const half = makeCanvas(Math.round(PW / 2), Math.round(PH / 2));
+    half.getContext('2d').drawImage(pic, 0, 0, half.width, half.height);
     for (const [i, [tStar, amount]] of STAGES.entries()) {
-      const far = duoFarCopy(pic, side === 'R' ? 'right' : 'left', maxBlur * amount, maxDim * amount);
+      const far = duoFarCopy(half, side === 'R' ? 'right' : 'left', (maxBlur * amount) / 2, maxDim * amount);
       layers.push(newLayer('image', project, { ...geo(hinge), name: `Duo ${side} far ${i + 1}`, asset: await canvasAsset(far, 'image/jpeg', 0.9), gyro: gy(stageZ(dir, tStar)) }));
     }
   }

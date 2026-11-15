@@ -204,12 +204,14 @@ export async function exportRender(layer, project) {
   if (layer.kind === 'image') {
     const b = await getBlob(layer.asset);
     if (!b) return null;
-    return { bytes: await bytesOf(b), ext: extOf(b) };
+    const small = await fitForExport(b, layer, scale);
+    return { bytes: await bytesOf(small), ext: extOf(small) };
   }
   if (layer.kind === 'video') {
     const frames = [];
     for (const id of layer.video?.frames || []) {
-      const b = await getBlob(id);
+      let b = await getBlob(id);
+      if (b) b = await fitForExport(b, layer, scale);
       if (b) frames.push({ bytes: await bytesOf(b), ext: extOf(b) });
     }
     if (!frames.length) return null;
@@ -225,6 +227,38 @@ export async function exportRender(layer, project) {
   let blob = scale === 3 ? layerCache.get(sig)?.blob : null;
   if (!blob) blob = await renderLayerBlob(layer, scale);
   return { bytes: await bytesOf(blob), ext: extOf(blob) };
+}
+
+/**
+ * Memory guard: iOS decodes every picture at full size, and PosterBoard is killed (crash loop)
+ * when it runs out of memory. Pictures far larger than the layer can ever show are scaled down
+ * to what is needed (layer size × largest state scale × @3x, at most 4096 px).
+ */
+async function fitForExport(blob, layer, scale) {
+  const scales = [layer.scale || 1, ...Object.values(layer.states || {}).map((s) => s.scale || 0)];
+  const need = Math.max(...scales) * scale;
+  const tw = Math.min(4096, Math.ceil(layer.w * need));
+  const th = Math.min(4096, Math.ceil(layer.h * need));
+  let img;
+  try {
+    img = await createImageBitmap(blob);
+  } catch {
+    return blob; // HEIC etc. that this browser can't decode: leave as is
+  }
+  const f = Math.max(tw / img.width, th / img.height);
+  const cap = Math.min(1, 4096 / Math.max(img.width, img.height));
+  const k = Math.min(f, cap);
+  if (k >= 0.87) {
+    img.close?.();
+    return blob;
+  }
+  const c = makeCanvas(Math.max(1, Math.round(img.width * k)), Math.max(1, Math.round(img.height * k)));
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  img.close?.();
+  const png = /png|gif|webp/i.test(blob.type);
+  return canvasToBlob(c, png ? 'image/png' : 'image/jpeg', 0.9);
 }
 
 /** Small JPEG thumbnail of a whole project (for the library). */
